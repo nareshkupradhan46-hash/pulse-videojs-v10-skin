@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence — Video.js v10 Skin &amp; Tag Badge</title>
+    <meta name="description" content="A custom modern Video.js v10 player skin and pixel-perfect #Video.js Skins Design Challenge tag badge built with accessibility, keyboard navigation, and bright/dark video legibility." />
+    <meta property="og:title" content="Cadence — Video.js v10 Skin &amp; Tag Badge" />
+    <meta property="og:description" content="A custom modern Video.js v10 player skin and pixel-perfect #Video.js Skins Design Challenge tag badge built with accessibility, keyboard navigation, and bright/dark video legibility." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      html, body { background-color: #0B0B0D; color: #F4F4F0; }
+    </style>
+  </head>
+  <body class="bg-[#0B0B0D] text-[#F4F4F0] antialiased selection:bg-[#FF6B00]/30 selection:text-amber-100">
+    <a
+      href="#player-stage"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-[#FF6B00] focus:px-4 focus:py-2 focus:text-xs focus:font-semibold focus:text-black focus:outline-none"
+    >
+      Skip to video player
+    </a>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        if ('caches' in window) {
+          caches.keys().then(function (keys) {
+            keys.forEach(function (key) {
+              caches.delete(key);
+            });
+          });
+        }
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            var hadActive = regs.length > 0;
+            Promise.all(
+              regs.map(function (reg) {
+                return reg.unregister();
+              })
+            ).then(function () {
+              if (
+                hadActive &&
+                navigator.serviceWorker.controller &&
+                !sessionStorage.getItem('pulse:sw-purged-v3')
+              ) {
+                sessionStorage.setItem('pulse:sw-purged-v3', '1');
+                location.reload();
+              }
+            });
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

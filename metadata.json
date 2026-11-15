@@ -1,0 +1,6 @@
+{
+  "name": "Cadence — Video.js v10 Skin & Tag Badge",
+  "description": "A custom modern Video.js v10 player skin and pixel-perfect #Video.js Skins Design Challenge tag badge built with accessibility, keyboard navigation, and bright/dark video legibility.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

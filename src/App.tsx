@@ -665,7 +665,7 @@ export default function App() {
                   Pulse Player UI for Video.js v10
                 </h1>
                 <p className="text-sm sm:text-base text-zinc-400 leading-relaxed max-w-xl">
-                  An obsidian glass instrument skin built on @videojs/react v10 with a live 3-band Web Audio oscilloscope, precision laser scrubber, ambient frame sampling, and AAA contrast compliance.
+                  An obsidian glass instrument skin built on @videojs/react v10 with live frame color sampling, Voice-Isolated Night Mode, Photosensitive Flash Guard, precision laser scrubber, and WCAG-verified contrast.
                 </p>
               </div>
 

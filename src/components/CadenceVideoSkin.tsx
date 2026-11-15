@@ -1705,11 +1705,15 @@ export function CadenceVideoSkin({
                                 backgroundColor:
                                   nightAudioMode !== 'off'
                                     ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                    : 'rgba(255, 255, 255, 0.12)',
+                                    : theme === 'light'
+                                      ? 'rgba(17, 24, 39, 0.16)'
+                                      : 'rgba(255, 255, 255, 0.12)',
                                 borderColor:
                                   nightAudioMode !== 'off'
                                     ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                    : 'rgba(255, 255, 255, 0.22)',
+                                    : theme === 'light'
+                                      ? 'rgba(17, 24, 39, 0.28)'
+                                      : 'rgba(255, 255, 255, 0.22)',
                                 boxShadow:
                                   nightAudioMode !== 'off'
                                     ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
@@ -1836,11 +1840,15 @@ export function CadenceVideoSkin({
                                 backgroundColor:
                                   flashGuardMode !== 'off'
                                     ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                    : 'rgba(255, 255, 255, 0.12)',
+                                    : theme === 'light'
+                                      ? 'rgba(17, 24, 39, 0.16)'
+                                      : 'rgba(255, 255, 255, 0.12)',
                                 borderColor:
                                   flashGuardMode !== 'off'
                                     ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                    : 'rgba(255, 255, 255, 0.22)',
+                                    : theme === 'light'
+                                      ? 'rgba(17, 24, 39, 0.28)'
+                                      : 'rgba(255, 255, 255, 0.22)',
                                 boxShadow:
                                   flashGuardMode !== 'off'
                                     ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
@@ -1968,10 +1976,14 @@ export function CadenceVideoSkin({
                               style={{
                                 backgroundColor: showSignalBattery
                                   ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                  : 'rgba(255, 255, 255, 0.12)',
+                                  : theme === 'light'
+                                    ? 'rgba(17, 24, 39, 0.16)'
+                                    : 'rgba(255, 255, 255, 0.12)',
                                 borderColor: showSignalBattery
                                   ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                  : 'rgba(255, 255, 255, 0.22)',
+                                  : theme === 'light'
+                                    ? 'rgba(17, 24, 39, 0.28)'
+                                    : 'rgba(255, 255, 255, 0.22)',
                                 boxShadow: showSignalBattery
                                   ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
                                   : 'none',
@@ -2001,10 +2013,14 @@ export function CadenceVideoSkin({
                               style={{
                                 backgroundColor: showTime
                                   ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                  : 'rgba(255, 255, 255, 0.12)',
+                                  : theme === 'light'
+                                    ? 'rgba(17, 24, 39, 0.16)'
+                                    : 'rgba(255, 255, 255, 0.12)',
                                 borderColor: showTime
                                   ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                  : 'rgba(255, 255, 255, 0.22)',
+                                  : theme === 'light'
+                                    ? 'rgba(17, 24, 39, 0.28)'
+                                    : 'rgba(255, 255, 255, 0.22)',
                                 boxShadow: showTime
                                   ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
                                   : 'none',

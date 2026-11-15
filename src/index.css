@@ -354,7 +354,7 @@
   .cadence-center-play:focus-visible {
     outline: 2px solid var(--pulse-ring);
     outline-offset: 3px;
-    box-shadow: 0 0 0 4px var(--pulse-accent-glow);
+    box-shadow: 0 0 0 2px #09090b, 0 0 0 5px var(--pulse-accent-glow);
   }
 
   .cadence-center-seek {
@@ -398,7 +398,7 @@
   .cadence-center-seek:focus-visible {
     outline: 2px solid var(--pulse-ring);
     outline-offset: 3px;
-    box-shadow: 0 0 0 4px var(--pulse-accent-glow);
+    box-shadow: 0 0 0 2px #09090b, 0 0 0 5px var(--pulse-accent-glow);
   }
 
   .cadence-skin:not([data-paused]) .cadence-center-stage {
@@ -720,7 +720,8 @@
     background: #ffffff;
     border: 2px solid rgb(var(--pulse-video-rgb, 255, 107, 0));
     box-shadow:
-      0 0 0 2px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.22),
+      0 0 0 2px #09090b,
+      0 0 0 4px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.22),
       0 0 14px rgb(var(--pulse-video-rgb, 255, 107, 0)),
       0 0 4px #ffffff;
     transform: translateX(-50%) scale(0.86);
@@ -800,7 +801,7 @@
   .cadence-time-thumb:focus-visible {
     outline: 2px solid rgb(var(--pulse-video-rgb, 255, 107, 0));
     outline-offset: 3px;
-    box-shadow: 0 0 0 5px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.36);
+    box-shadow: 0 0 0 2px #09090b, 0 0 0 5px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.36);
   }
 
   /* Seek-Bar Preview Thumbnail + Timestamp Tooltip */
@@ -1000,7 +1001,7 @@
   .cadence-btn:focus-visible {
     outline: 2px solid rgb(var(--pulse-video-rgb, 255, 107, 0));
     outline-offset: 2px;
-    box-shadow: 0 0 0 4px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.3);
+    box-shadow: 0 0 0 2px #09090b, 0 0 0 5px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.3);
     background: rgba(var(--pulse-video-rgb, 255, 107, 0), 0.14);
   }
 

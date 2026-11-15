@@ -103,7 +103,7 @@ export function LiveAuditPanel({
           </div>
 
           <p className="text-xs text-zinc-400 leading-relaxed">
-            Real-time sRGB relative luminance compositing the transparent glass HUD menubar over the 62% bottom scrim and{' '}
+            Real-time sRGB relative luminance compositing the obsidian glass HUD (<span className="font-mono-tabular text-zinc-300">rgba(9,9,11,0.88)</span> + <span className="font-mono-tabular text-zinc-300">#09090B</span> contrast ring) over the 72% bottom scrim and{' '}
             <span className="font-mono-tabular text-zinc-200">
               {contrastSample === 'white' ? '#FFFFFF (worst-case bright glare)' : '#000000 (pitch black frame)'}
             </span>
@@ -130,7 +130,7 @@ export function LiveAuditPanel({
                     className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                       row.grade === 'AAA'
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35'
-                        : 'bg-white/10 text-zinc-200 border border-white/15'
+                        : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/35'
                     }`}
                   >
                     {row.grade}

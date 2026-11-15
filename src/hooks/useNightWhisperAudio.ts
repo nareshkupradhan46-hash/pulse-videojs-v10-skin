@@ -186,12 +186,13 @@ export function useNightWhisperAudio(
 
     const timer = window.setInterval(() => {
       if (videoEl.paused || videoEl.ended) {
-        setCompressionDb(0);
+        setCompressionDb((prev) => (prev === 0 ? prev : 0));
         return;
       }
       const red = Math.round(graph.compressor.reduction * 10) / 10;
-      setCompressionDb(Math.abs(red) < 0.1 ? 0 : red);
-    }, 120);
+      const next = Math.abs(red) < 0.1 ? 0 : red;
+      setCompressionDb((prev) => (prev === next ? prev : next));
+    }, 350);
 
     return () => {
       window.clearInterval(timer);

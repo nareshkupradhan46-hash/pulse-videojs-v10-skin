@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Check, Copy, Maximize, Sun, Moon, Layers } from 'lucide-react';
 import { ChallengeTagBadge, type TagBadgeSize, type TagBadgeVariant } from './ChallengeTagBadge';
 
 const SUFFIX_OPTIONS = ['v10', '2026', 'Apache-2.0', ''] as const;
 
-export function TagBadgeShowcase() {
+export const TagBadgeShowcase = memo(function TagBadgeShowcase() {
   const [variant, setVariant] = useState<TagBadgeVariant>('obsidian');
   const [size, setSize] = useState<TagBadgeSize>('display');
   const [suffix, setSuffix] = useState<string>('v10');
@@ -251,4 +251,4 @@ export function TagBadgeShowcase() {
       </div>
     </section>
   );
-}
+});

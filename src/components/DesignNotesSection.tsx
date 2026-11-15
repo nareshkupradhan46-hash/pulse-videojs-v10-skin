@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 
 const DESIGN_THINKING_COPY = `Pulse (Cadence) is a custom Video.js v10 skin built on @videojs/react 10.4.0 pairing cinema-monitor ergonomics with an adaptive obsidian glass HUD. Live frame color sampling harmonizes accent glows and the laser scrubber with the active footage, while a dual-edge gradient scrim and 1px hairline framing maintain crisp legibility across pure #FFFFFF glare and #000000 cinema scenes. Beyond standard transport, speed, quality, WebVTT captions/chapters, and resilient native-or-floating Picture-in-Picture, the skin introduces two accessibility-first Web engines: Voice-Isolated Night Mode (a 6-stage Web Audio vocal EQ and Whisper Compressor with live dB peak-taming telemetry) and Photosensitive Flash Guard (real-time BT.709 luminance, red-flash, and 3 Hz strobe clamping). Mobile touch adds double-tap edge ripples (±10s) and vertical-swipe Brightness/Volume HUD controls, backed by @container scaling down to 320px, remappable hotkeys, frame bookmarks, and reduced-motion/high-contrast overrides.`;
 
-export function DesignNotesSection() {
+export const DesignNotesSection = memo(function DesignNotesSection() {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -120,4 +120,4 @@ export function DesignNotesSection() {
       </div>
     </section>
   );
-}
+});

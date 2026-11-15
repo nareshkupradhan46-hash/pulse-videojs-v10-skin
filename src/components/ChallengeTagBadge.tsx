@@ -72,28 +72,28 @@ const SIZE_STYLES: Record<
   }
 > = {
   compact: {
-    shell: 'h-7 rounded-[7px] p-[3px] gap-2',
+    shell: 'h-7 rounded-[7px] p-[3px] gap-1.5 sm:gap-2',
     hashCell: 'w-[20px] h-[20px] rounded-[4px]',
     hashIcon: 'w-3 h-3',
-    label: 'text-[11.5px] font-semibold tracking-[-0.01em] pr-1.5',
-    suffix: 'text-[10px] px-2',
+    label: 'text-[11px] sm:text-[11.5px] font-semibold tracking-[-0.01em] pr-1 sm:pr-1.5',
+    suffix: 'text-[10px] px-1.5 sm:px-2',
     copyBtn: 'h-[20px] px-1.5 text-[10px]',
   },
   standard: {
-    shell: 'h-9 rounded-[9px] p-1 gap-2.5',
-    hashCell: 'w-[26px] h-[26px] rounded-[5px]',
+    shell: 'h-9 rounded-[9px] p-1 gap-1.5 sm:gap-2.5',
+    hashCell: 'w-[24px] h-[24px] sm:w-[26px] sm:h-[26px] rounded-[5px]',
     hashIcon: 'w-3.5 h-3.5',
-    label: 'text-[13px] font-semibold tracking-[-0.015em] pr-1',
-    suffix: 'text-[11px] px-2.5',
-    copyBtn: 'h-[26px] px-2 text-[11px]',
+    label: 'text-[11.5px] sm:text-[13px] font-semibold tracking-[-0.015em] pr-0.5 sm:pr-1',
+    suffix: 'text-[10px] sm:text-[11px] px-1.5 sm:px-2.5',
+    copyBtn: 'h-[26px] px-1.5 sm:px-2 text-[10.5px] sm:text-[11px]',
   },
   display: {
-    shell: 'h-12 rounded-[11px] p-1.5 gap-3.5',
-    hashCell: 'w-9 h-9 rounded-[7px]',
-    hashIcon: 'w-[18px] h-[18px]',
-    label: 'text-[15px] sm:text-[16px] font-semibold tracking-[-0.02em] pr-2',
-    suffix: 'text-[12px] px-3',
-    copyBtn: 'h-9 px-3 text-[12px]',
+    shell: 'h-10 sm:h-12 rounded-[11px] p-1 sm:p-1.5 gap-2 sm:gap-3.5',
+    hashCell: 'w-8 h-8 sm:w-9 sm:h-9 rounded-[7px]',
+    hashIcon: 'w-4 h-4 sm:w-[18px] sm:h-[18px]',
+    label: 'text-[12.5px] sm:text-[16px] font-semibold tracking-[-0.02em] pr-1 sm:pr-2',
+    suffix: 'text-[11px] sm:text-[12px] px-2 sm:px-3',
+    copyBtn: 'h-8 sm:h-9 px-2 sm:px-3 text-[11px] sm:text-[12px]',
   },
 };
 
@@ -140,7 +140,7 @@ export function ChallengeTagBadge({
 
   return (
     <div
-      className={`group relative inline-flex items-center whitespace-nowrap shrink-0 select-none transition-colors duration-150 ${v.shell} ${s.shell} ${className}`}
+      className={`group relative inline-flex items-center max-w-full min-w-0 select-none transition-colors duration-150 ${v.shell} ${s.shell} ${className}`}
     >
       {/* Optical registration ticks on corners for precision hardware feel */}
       <span
@@ -161,7 +161,7 @@ export function ChallengeTagBadge({
       </span>
 
       {/* Challenge Title */}
-      <span className={`leading-none whitespace-nowrap ${v.label} ${s.label}`}>
+      <span className={`leading-none truncate min-w-0 ${v.label} ${s.label}`}>
         <span className="sr-only">#</span>
         {label}
       </span>
@@ -169,7 +169,7 @@ export function ChallengeTagBadge({
       {/* Version Marker */}
       {tagSuffix && (
         <span
-          className={`font-mono-tabular leading-none flex items-center h-full font-medium ${v.suffix} ${s.suffix}`}
+          className={`hidden xs:flex sm:flex font-mono-tabular leading-none items-center h-full font-medium shrink-0 ${v.suffix} ${s.suffix}`}
         >
           {tagSuffix}
         </span>
@@ -181,17 +181,17 @@ export function ChallengeTagBadge({
           type="button"
           onClick={handleCopy}
           aria-label={copied ? 'Tag copied to clipboard' : `Copy #${label}`}
-          className={`inline-flex items-center gap-1.5 rounded-r-[5px] font-mono-tabular font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400 focus-visible:outline-offset-2 ${v.copyBtn} ${s.copyBtn}`}
+          className={`inline-flex items-center gap-1 sm:gap-1.5 shrink-0 rounded-r-[5px] font-mono-tabular font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-400 focus-visible:outline-offset-2 ${v.copyBtn} ${s.copyBtn}`}
         >
           {copied ? (
             <>
               <Check className="w-3 h-3 text-amber-400" aria-hidden="true" />
-              <span>Copied</span>
+              <span className="hidden sm:inline">Copied</span>
             </>
           ) : (
             <>
               <Copy className="w-3 h-3" aria-hidden="true" />
-              <span>Copy</span>
+              <span className="hidden sm:inline">Copy</span>
             </>
           )}
         </button>

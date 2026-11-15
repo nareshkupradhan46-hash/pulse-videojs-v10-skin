@@ -4,6 +4,27 @@ function clampChannel(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)));
 }
 
+function parseHexToRgbTuple(hex: string): [number, number, number] {
+  const clean = hex.trim().replace('#', '');
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+      return [r, g, b];
+    }
+  }
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+      return [r, g, b];
+    }
+  }
+  return [255, 107, 0];
+}
+
 function normalizeVibrantRgb(r: number, g: number, b: number): [number, number, number] {
   const lum = r * 0.299 + g * 0.587 + b * 0.114;
   let nr = r;
@@ -31,11 +52,27 @@ function normalizeVibrantRgb(r: number, g: number, b: number): [number, number, 
 export function useLiveColorSampling(
   videoElement: HTMLVideoElement | null,
   posterUrl: string | undefined,
-  enabled: boolean
+  enabled: boolean,
+  initialThemeHex = '#FF6B00',
+  resetKey = ''
 ): string {
-  const [ambientRgb, setAmbientRgb] = useState<string>('255, 107, 0');
-  const lastRgbRef = useRef<[number, number, number]>([255, 107, 0]);
+  const initialTuple = parseHexToRgbTuple(initialThemeHex);
+  const [ambientRgb, setAmbientRgb] = useState<string>(
+    `${initialTuple[0]}, ${initialTuple[1]}, ${initialTuple[2]}`
+  );
+  const displayRgbRef = useRef<[number, number, number]>(initialTuple);
+  const targetRgbRef = useRef<[number, number, number]>(initialTuple);
+  const hasVideoSampleRef = useRef<boolean>(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Start immediately on the active theme color whenever theme, custom accent, or video changes
+  useEffect(() => {
+    const base = parseHexToRgbTuple(initialThemeHex);
+    displayRgbRef.current = base;
+    targetRgbRef.current = base;
+    hasVideoSampleRef.current = false;
+    setAmbientRgb(`${base[0]}, ${base[1]}, ${base[2]}`);
+  }, [initialThemeHex, resetKey]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -47,19 +84,29 @@ export function useLiveColorSampling(
       canvasRef.current = c;
     }
 
-    const commitRgb = (next: [number, number, number]) => {
-      const prev = lastRgbRef.current;
+    const stepBlendTowardTarget = (lerpFactor: number) => {
+      if (!hasVideoSampleRef.current) return;
+      const cur = displayRgbRef.current;
+      const tgt = targetRgbRef.current;
+      const next: [number, number, number] = [
+        clampChannel(cur[0] + (tgt[0] - cur[0]) * lerpFactor),
+        clampChannel(cur[1] + (tgt[1] - cur[1]) * lerpFactor),
+        clampChannel(cur[2] + (tgt[2] - cur[2]) * lerpFactor),
+      ];
       const delta =
-        Math.abs(next[0] - prev[0]) +
-        Math.abs(next[1] - prev[1]) +
-        Math.abs(next[2] - prev[2]);
-      if (delta >= 12) {
-        lastRgbRef.current = next;
+        Math.abs(next[0] - cur[0]) +
+        Math.abs(next[1] - cur[1]) +
+        Math.abs(next[2] - cur[2]);
+      if (delta >= 6) {
+        displayRgbRef.current = next;
         setAmbientRgb(`${next[0]}, ${next[1]}, ${next[2]}`);
       }
     };
 
-    const sampleElement = (source: HTMLVideoElement | HTMLImageElement): boolean => {
+    const sampleElement = (
+      source: HTMLVideoElement | HTMLImageElement,
+      lerpFactor: number
+    ): boolean => {
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d', { willReadFrequently: true });
       if (!canvas || !ctx) return false;
@@ -91,13 +138,13 @@ export function useLiveColorSampling(
         }
 
         if (weightSum > 0) {
-          commitRgb(
-            normalizeVibrantRgb(
-              rSum / weightSum,
-              gSum / weightSum,
-              bSum / weightSum
-            )
+          targetRgbRef.current = normalizeVibrantRgb(
+            rSum / weightSum,
+            gSum / weightSum,
+            bSum / weightSum
           );
+          hasVideoSampleRef.current = true;
+          stepBlendTowardTarget(lerpFactor);
           return true;
         }
       } catch {
@@ -106,47 +153,49 @@ export function useLiveColorSampling(
       return false;
     };
 
+    let posterImg: HTMLImageElement | null = null;
     if (posterUrl) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        if (!videoElement || videoElement.readyState < 2) {
-          sampleElement(img);
-        }
-      };
-      img.src = posterUrl;
+      posterImg = new Image();
+      posterImg.crossOrigin = 'anonymous';
+      posterImg.src = posterUrl;
     }
 
-    const sampleVideoIfReady = () => {
+    const sampleWhenPlayingOrSeeked = (lerpFactor: number) => {
       if (videoElement && videoElement.readyState >= 2) {
-        sampleElement(videoElement);
+        if (!videoElement.paused || videoElement.currentTime > 0.35) {
+          const ok = sampleElement(videoElement, lerpFactor);
+          if (!ok && posterImg?.complete && posterImg.naturalWidth > 0) {
+            sampleElement(posterImg, lerpFactor);
+          }
+        }
       }
     };
 
+    const onPlay = () => sampleWhenPlayingOrSeeked(0.18);
+    const onSeeked = () => sampleWhenPlayingOrSeeked(0.45);
+
     if (videoElement) {
-      sampleVideoIfReady();
-      videoElement.addEventListener('loadeddata', sampleVideoIfReady);
-      videoElement.addEventListener('canplay', sampleVideoIfReady);
-      videoElement.addEventListener('seeked', sampleVideoIfReady);
-      videoElement.addEventListener('play', sampleVideoIfReady);
+      if (!videoElement.paused || videoElement.currentTime > 0.35) {
+        sampleWhenPlayingOrSeeked(0.22);
+      }
+      videoElement.addEventListener('play', onPlay);
+      videoElement.addEventListener('seeked', onSeeked);
     }
 
     const interval = window.setInterval(() => {
       if (videoElement && videoElement.readyState >= 2 && !videoElement.paused) {
-        sampleElement(videoElement);
+        sampleWhenPlayingOrSeeked(0.28);
       }
     }, 1000);
 
     return () => {
       window.clearInterval(interval);
       if (videoElement) {
-        videoElement.removeEventListener('loadeddata', sampleVideoIfReady);
-        videoElement.removeEventListener('canplay', sampleVideoIfReady);
-        videoElement.removeEventListener('seeked', sampleVideoIfReady);
-        videoElement.removeEventListener('play', sampleVideoIfReady);
+        videoElement.removeEventListener('play', onPlay);
+        videoElement.removeEventListener('seeked', onSeeked);
       }
     };
-  }, [videoElement, posterUrl, enabled]);
+  }, [videoElement, posterUrl, enabled, initialThemeHex, resetKey]);
 
   return ambientRgb;
 }

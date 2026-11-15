@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type KeyboardEvent,
   type ReactElement,
@@ -11,7 +12,6 @@ import {
 } from 'react';
 import {
   BufferingIndicator,
-  CaptionsButton,
   CaptionsRadioGroup,
   Container,
   Controls,
@@ -22,6 +22,7 @@ import {
   MuteButton,
   PlayButton,
   PlaybackRateRadioGroup,
+  Popover,
   Poster,
   QualityRadioGroup,
   SeekButton,
@@ -39,6 +40,8 @@ import {
   useQualityOptions,
 } from '@videojs/react';
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
   AudioLines,
   BookmarkPlus,
   Captions,
@@ -47,16 +50,20 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   Download,
   FastForward,
+  FileText,
   Gauge,
   Maximize2,
   Minimize2,
+  Minus,
   Moon,
   Palette,
   Pause,
   PictureInPicture2,
   Play,
+  Plus,
   Rewind,
   RotateCcw,
   RotateCw,
@@ -69,16 +76,17 @@ import {
   SunDim,
   SunMedium,
   Tv,
+  Upload,
   Volume1,
   Volume2,
   VolumeX,
   Wifi,
   Zap,
 } from 'lucide-react';
-import { ChallengeTagBadge } from './ChallengeTagBadge';
 import { useDeviceStatus } from '../hooks/useDeviceStatus';
 import type { FlashGuardState } from '../hooks/useFlashGuard';
 import {
+  DEFAULT_SUBTITLE_STYLE,
   THEME_ACCENTS,
   type FlashGuardMode,
   type FrameBookmark,
@@ -86,11 +94,33 @@ import {
   type NightAudioMode,
   type PulseAccessibilityState,
   type PulseThemeId,
+  type SubtitleEdgeStyle,
   type SubtitleStyleState,
 } from '../types/pulse';
-import { formatTimecode, type VideoReel } from '../utils/synthVideo';
+import {
+  cuesToVtt,
+  formatTimecode,
+  parseSubtitlesFile,
+  type ReelSubtitleCue,
+  type ReelSubtitleTrack,
+  type VideoReel,
+} from '../utils/synthVideo';
 
-const QUALITY_TIERS = ['Auto', '1080p', '720p', '480p', '360p'] as const;
+const QUALITY_TIERS = [
+  'Auto',
+  '4K (2160p)',
+  '1440p (2K)',
+  '1080p',
+  '720p',
+  '480p',
+  '360p',
+] as const;
+
+const HIGH_RES_PROFILES = [
+  { label: '4K (2160p)', height: 2160, badge: 'UHD' },
+  { label: '1440p (2K)', height: 1440, badge: 'QHD' },
+  { label: '1080p', height: 1080, badge: 'FHD' },
+] as const;
 
 const THEME_LABELS: Record<PulseThemeId, string> = {
   amber: 'Pulse Amber',
@@ -110,6 +140,10 @@ interface CadenceVideoSkinProps {
   onChangeTheme: (theme: PulseThemeId) => void;
   accessibility: PulseAccessibilityState;
   subtitleStyle: SubtitleStyleState;
+  onUpdateSubtitleStyle?: (patch: Partial<SubtitleStyleState>) => void;
+  customSubtitleTrack?: ReelSubtitleTrack | null;
+  onUploadSubtitleTrack?: (track: ReelSubtitleTrack) => void;
+  onSubtitleUserInteraction?: () => void;
   bookmarks: FrameBookmark[];
   resumeTime: number | null;
   currentTime: number;
@@ -128,7 +162,6 @@ interface CadenceVideoSkinProps {
   onDownload: () => void;
   keymap: KeymapConfig;
   forceControlsVisible?: boolean;
-  showInPlayerBadge?: boolean;
   showSignalBattery?: boolean;
   onToggleSignalBattery?: () => void;
   showTime?: boolean;
@@ -166,14 +199,39 @@ function ControlTooltip({
   );
 }
 
-function hexToGlowRgba(hex: string, alpha = 0.45): string {
-  const clean = hex.replace('#', '').trim();
-  if (clean.length !== 6) return `rgba(255, 107, 0, ${alpha})`;
+function hexToRgbString(hex: string): string {
+  const raw = hex.replace('#', '').trim();
+  const clean =
+    raw.length === 3
+      ? raw
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : raw;
+  if (clean.length !== 6) return '255, 107, 0';
   const r = parseInt(clean.slice(0, 2), 16);
   const g = parseInt(clean.slice(2, 4), 16);
   const b = parseInt(clean.slice(4, 6), 16);
-  if ([r, g, b].some((n) => Number.isNaN(n))) return `rgba(255, 107, 0, ${alpha})`;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  if ([r, g, b].some((n) => Number.isNaN(n))) return '255, 107, 0';
+  return `${r}, ${g}, ${b}`;
+}
+
+function hexToGlowRgba(hex: string, alpha = 0.45): string {
+  return `rgba(${hexToRgbString(hex)}, ${alpha})`;
+}
+
+function relativeRgbLuminance(rgbStr: string): number {
+  const parts = rgbStr.split(',').map((s) => Number(s.trim()));
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return 0.3;
+  const lin = (c: number) => {
+    const s = Math.max(0, Math.min(255, c)) / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin(parts[0]) + 0.7152 * lin(parts[1]) + 0.0722 * lin(parts[2]);
+}
+
+function contrastTextForRgb(rgbStr: string): string {
+  return relativeRgbLuminance(rgbStr) > 0.42 ? '#09090b' : '#ffffff';
 }
 
 export function CadenceVideoSkin({
@@ -187,6 +245,10 @@ export function CadenceVideoSkin({
   onChangeTheme,
   accessibility,
   subtitleStyle,
+  onUpdateSubtitleStyle,
+  customSubtitleTrack,
+  onUploadSubtitleTrack,
+  onSubtitleUserInteraction,
   bookmarks,
   resumeTime,
   currentTime,
@@ -204,7 +266,6 @@ export function CadenceVideoSkin({
   onDownload,
   keymap,
   forceControlsVisible = false,
-  showInPlayerBadge = true,
   showSignalBattery = false,
   onToggleSignalBattery,
   showTime = false,
@@ -270,6 +331,24 @@ export function CadenceVideoSkin({
     value: number;
   } | null>(null);
   const swipeHudTimerRef = useRef<number | null>(null);
+
+  const [subtitlesOpen, setSubtitlesOpen] = useState<boolean>(false);
+  const [subtitlesTab, setSubtitlesTab] = useState<'controls' | 'transcript'>('controls');
+  const [transcriptCopied, setTranscriptCopied] = useState<boolean>(false);
+  const [subtitleUploadMsg, setSubtitleUploadMsg] = useState<string | null>(null);
+  const subtitleFileInputRef = useRef<HTMLInputElement>(null);
+
+  interface DiscoveredTrack {
+    index: number;
+    label: string;
+    language: string;
+    kind: string;
+    mode: TextTrackMode;
+  }
+  const [discoveredTracks, setDiscoveredTracks] = useState<DiscoveredTrack[]>([]);
+  const [lastActiveTrackIdx, setLastActiveTrackIdx] = useState<number>(0);
+  const [preciseTime, setPreciseTime] = useState<number>(currentTime);
+  const [nativeCuesSnapshot, setNativeCuesSnapshot] = useState<ReelSubtitleCue[]>([]);
 
   const showShortcutHint = useCallback(
     (
@@ -491,6 +570,39 @@ export function CadenceVideoSkin({
     qualityOptions && !qualityOptions.hidden && qualityOptions.options.length > 1
   );
 
+  const highestNativeHls = useMemo(() => {
+    if (!qualityOptions || qualityOptions.options.length === 0) {
+      return { value: '', maxHeight: 0 };
+    }
+    let bestValue = '';
+    let maxHeight = 0;
+    for (const opt of qualityOptions.options) {
+      if (opt.value === 'auto') continue;
+      const m = opt.label.match(/(\d{3,4})p/i);
+      const h = m ? Number(m[1]) : 0;
+      if (h >= maxHeight) {
+        maxHeight = h;
+        bestValue = opt.value;
+      }
+    }
+    return { value: bestValue, maxHeight };
+  }, [qualityOptions]);
+
+  const extraHighResProfiles = useMemo(() => {
+    if (!hasHlsRenditions) return [];
+    return HIGH_RES_PROFILES.filter((p) => p.height > highestNativeHls.maxHeight);
+  }, [hasHlsRenditions, highestNativeHls.maxHeight]);
+
+  const handleSelectHighResProfile = useCallback(
+    (label: string) => {
+      if (hasHlsRenditions && highestNativeHls.value && qualityOptions) {
+        qualityOptions.setValue(highestNativeHls.value);
+      }
+      onSelectQuality(label);
+    },
+    [hasHlsRenditions, highestNativeHls.value, qualityOptions, onSelectQuality]
+  );
+
   useEffect(() => {
     const updateClock = () => {
       setClockLabel(
@@ -501,8 +613,247 @@ export function CadenceVideoSkin({
     return () => window.clearInterval(timer);
   }, []);
 
+  // Sync discovered subtitle/caption tracks and precise time from underlying <video>
+  const syncTextTracksFromDom = useCallback(() => {
+    const video = playerContainer?.querySelector('video');
+    if (!video || !video.textTracks) {
+      setDiscoveredTracks([]);
+      setNativeCuesSnapshot([]);
+      return;
+    }
+
+    const list: DiscoveredTrack[] = [];
+    let showingTrack: TextTrack | null = null;
+    for (let i = 0; i < video.textTracks.length; i += 1) {
+      const tr = video.textTracks[i];
+      if (tr.kind !== 'subtitles' && tr.kind !== 'captions') continue;
+      const idx = list.length;
+      list.push({
+        index: idx,
+        label: tr.label || (tr.language ? `Track (${tr.language.toUpperCase()})` : `Track ${idx + 1}`),
+        language: tr.language || 'en',
+        kind: tr.kind,
+        mode: tr.mode,
+      });
+      if (tr.mode === 'showing') {
+        showingTrack = tr;
+        setLastActiveTrackIdx(idx);
+      }
+    }
+    setDiscoveredTracks(list);
+
+    if (showingTrack && showingTrack.cues && showingTrack.cues.length > 0) {
+      const cues: ReelSubtitleCue[] = [];
+      for (let i = 0; i < showingTrack.cues.length; i += 1) {
+        const c = showingTrack.cues[i] as VTTCue;
+        if (typeof c.startTime === 'number' && typeof c.endTime === 'number' && c.text) {
+          cues.push({ start: c.startTime, end: c.endTime, text: c.text });
+        }
+      }
+      setNativeCuesSnapshot(cues);
+    } else {
+      setNativeCuesSnapshot([]);
+    }
+  }, [playerContainer]);
+
+  useEffect(() => {
+    const video = playerContainer?.querySelector('video');
+    if (!video) return;
+
+    syncTextTracksFromDom();
+    const onTrackChange = () => syncTextTracksFromDom();
+
+    video.addEventListener('loadedmetadata', onTrackChange);
+    video.textTracks?.addEventListener('change', onTrackChange);
+    video.textTracks?.addEventListener('addtrack', onTrackChange);
+    video.textTracks?.addEventListener('removetrack', onTrackChange);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', onTrackChange);
+      video.textTracks?.removeEventListener('change', onTrackChange);
+      video.textTracks?.removeEventListener('addtrack', onTrackChange);
+      video.textTracks?.removeEventListener('removetrack', onTrackChange);
+    };
+  }, [playerContainer, reel.id, customSubtitleTrack?.id, syncTextTracksFromDom]);
+
+  const activeSubtitleTrack = useMemo(
+    () => discoveredTracks.find((t) => t.mode === 'showing') ?? null,
+    [discoveredTracks]
+  );
+  const subtitlesActive = activeSubtitleTrack !== null;
+
+  useEffect(() => {
+    if (!subtitlesActive && !subtitlesOpen) return;
+    const video = playerContainer?.querySelector('video');
+    if (!video) return;
+
+    const onTime = () => setPreciseTime(video.currentTime || 0);
+    onTime();
+    video.addEventListener('timeupdate', onTime);
+    video.addEventListener('seeked', onTime);
+    return () => {
+      video.removeEventListener('timeupdate', onTime);
+      video.removeEventListener('seeked', onTime);
+    };
+  }, [playerContainer, subtitlesActive, subtitlesOpen, reel.id]);
+
+  useEffect(() => {
+    if (!subtitlesActive && !subtitlesOpen) return;
+    setPreciseTime(currentTime);
+  }, [currentTime, subtitlesActive, subtitlesOpen]);
+
+  const setSubtitleTrackMode = useCallback(
+    (targetIndex: number | null) => {
+      onSubtitleUserInteraction?.();
+      const video = playerContainer?.querySelector('video');
+      if (!video || !video.textTracks) return;
+
+      let subIdx = 0;
+      for (let i = 0; i < video.textTracks.length; i += 1) {
+        const tr = video.textTracks[i];
+        if (tr.kind !== 'subtitles' && tr.kind !== 'captions') continue;
+        tr.mode = targetIndex !== null && subIdx === targetIndex ? 'showing' : 'disabled';
+        subIdx += 1;
+      }
+      if (targetIndex !== null) {
+        setLastActiveTrackIdx(targetIndex);
+      }
+      syncTextTracksFromDom();
+    },
+    [onSubtitleUserInteraction, playerContainer, syncTextTracksFromDom]
+  );
+
+  const handleToggleSubtitlesMaster = useCallback(() => {
+    if (subtitlesActive) {
+      setSubtitleTrackMode(null);
+    } else if (discoveredTracks.length > 0) {
+      const target =
+        lastActiveTrackIdx < discoveredTracks.length ? lastActiveTrackIdx : 0;
+      setSubtitleTrackMode(target);
+    }
+  }, [subtitlesActive, discoveredTracks.length, lastActiveTrackIdx, setSubtitleTrackMode]);
+
+  const activeTrackCues = useMemo<ReelSubtitleCue[]>(() => {
+    if (nativeCuesSnapshot.length > 0) return nativeCuesSnapshot;
+    const allTracks = customSubtitleTrack
+      ? [...reel.subtitleTracks, customSubtitleTrack]
+      : reel.subtitleTracks;
+    if (activeSubtitleTrack) {
+      const matched =
+        allTracks.find(
+          (t) =>
+            t.label === activeSubtitleTrack.label ||
+            t.lang === activeSubtitleTrack.language
+        ) ?? allTracks[activeSubtitleTrack.index];
+      if (matched) return matched.cues;
+    }
+    return allTracks[0]?.cues ?? [];
+  }, [nativeCuesSnapshot, customSubtitleTrack, reel.subtitleTracks, activeSubtitleTrack]);
+
+  const effectiveSubtitleTime = Math.max(
+    0,
+    preciseTime - (subtitleStyle.syncOffsetSec ?? 0)
+  );
+
+  const activeCueTexts = useMemo(() => {
+    if (!subtitlesActive || activeTrackCues.length === 0) return [];
+    return activeTrackCues
+      .filter(
+        (c) =>
+          effectiveSubtitleTime >= c.start && effectiveSubtitleTime <= c.end
+      )
+      .map((c) => c.text);
+  }, [subtitlesActive, activeTrackCues, effectiveSubtitleTime]);
+
+  const handleCopyTranscript = async () => {
+    if (activeTrackCues.length === 0) return;
+    const text = activeTrackCues
+      .map((c) => `[${formatTimecode(c.start)}] ${c.text}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setTranscriptCopied(true);
+      window.setTimeout(() => setTranscriptCopied(false), 1800);
+    } catch {
+      // Clipboard blocked in restricted frame
+    }
+  };
+
+  const handleDownloadVtt = () => {
+    if (activeTrackCues.length === 0) return;
+    const vtt = cuesToVtt(activeTrackCues);
+    const blob = new Blob([vtt], { type: 'text/vtt' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${reel.id}-subtitles.vtt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleSubtitleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { vttBlobUrl, cues } = parseSubtitlesFile(text);
+      const baseName = file.name.replace(/\.(vtt|srt)$/i, '').slice(0, 22);
+      const customTrack: ReelSubtitleTrack = {
+        id: `custom-${Date.now()}`,
+        lang: 'en',
+        label: `Custom · ${baseName}`,
+        kind: 'subtitles',
+        src: vttBlobUrl,
+        cues,
+      };
+      onUploadSubtitleTrack?.(customTrack);
+      setSubtitleUploadMsg(`Loaded ${cues.length} cues`);
+      window.setTimeout(() => setSubtitleUploadMsg(null), 2400);
+      window.setTimeout(() => {
+        const video = playerContainer?.querySelector('video');
+        if (!video?.textTracks) return;
+        let lastSubIdx = -1;
+        let count = 0;
+        for (let i = 0; i < video.textTracks.length; i += 1) {
+          const tr = video.textTracks[i];
+          if (tr.kind === 'subtitles' || tr.kind === 'captions') {
+            lastSubIdx = count;
+            count += 1;
+          }
+        }
+        if (lastSubIdx >= 0) {
+          setSubtitleTrackMode(lastSubIdx);
+        }
+      }, 120);
+    } catch {
+      setSubtitleUploadMsg('Could not parse file');
+      window.setTimeout(() => setSubtitleUploadMsg(null), 2200);
+    }
+  };
+
+  const handleCueClick = () => {
+    if (!subtitleStyle.pauseOnCueClick) return;
+    const video = playerContainer?.querySelector('video');
+    if (!video) return;
+    if (video.paused) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
   const activeAccent =
     theme === 'custom' ? customAccent : THEME_ACCENTS[theme];
+
+  const isLightUi =
+    !accessibility.highContrast &&
+    (backdropMode === 'white' || (backdropMode === 'video' && theme === 'light'));
+  const isWhiteTone =
+    !isLightUi &&
+    (accessibility.highContrast || backdropMode === 'black');
 
   const skinStyle = useMemo(() => {
     const cueSize =
@@ -511,12 +862,224 @@ export function CadenceVideoSkin({
         : subtitleStyle.fontSize === 'lg'
           ? '1.25rem'
           : '1rem';
+    const themeAccentRgb = hexToRgbString(activeAccent);
     const videoRgb =
       backdropMode === 'white'
         ? '17, 24, 39'
         : backdropMode === 'black'
           ? '248, 250, 252'
-          : ambientRgb;
+          : ambientRgb || themeAccentRgb;
+    const videoLum = relativeRgbLuminance(videoRgb);
+    const adaptiveBorder =
+      videoLum < 0.16
+        ? `color-mix(in srgb, rgb(${videoRgb}) 64%, #ffffff 36%)`
+        : `rgba(${videoRgb}, 0.78)`;
+    const adaptiveHoverBorder =
+      videoLum < 0.16
+        ? `color-mix(in srgb, rgb(${videoRgb}) 72%, #ffffff 28%)`
+        : `rgb(${videoRgb})`;
+    const adaptiveHoverFg = contrastTextForRgb(videoRgb);
+    const adaptiveIconColor =
+      videoLum >= 0.24
+        ? `rgb(${videoRgb})`
+        : `color-mix(in srgb, rgb(${videoRgb}) 68%, #ffffff 32%)`;
+    const adaptiveActiveFg =
+      videoLum >= 0.26
+        ? `rgb(${videoRgb})`
+        : `color-mix(in srgb, rgb(${videoRgb}) 64%, #ffffff 36%)`;
+    const lightAdoptedBg =
+      videoLum > 0.36
+        ? `color-mix(in srgb, rgb(${videoRgb}) 78%, #09090b 22%)`
+        : `rgb(${videoRgb})`;
+    const lightAdoptedFg = contrastTextForRgb(
+      videoLum > 0.36 ? '17, 24, 39' : videoRgb
+    );
+
+    const btnVars = isLightUi
+      ? backdropMode === 'white'
+        ? {
+            '--pulse-btn-bg': 'rgba(255, 255, 255, 0.96)',
+            '--pulse-btn-fg': '#09090b',
+            '--pulse-btn-border': 'rgba(9, 9, 11, 0.88)',
+            '--pulse-btn-shadow':
+              '0 0 0 1px rgba(255, 255, 255, 0.96), 0 4px 12px rgba(0, 0, 0, 0.26)',
+            '--pulse-btn-hover-bg': '#09090b',
+            '--pulse-btn-hover-fg': '#ffffff',
+            '--pulse-btn-hover-border': '#09090b',
+            '--pulse-btn-hover-shadow':
+              '0 0 0 2px rgba(255, 255, 255, 0.96), 0 6px 16px rgba(0, 0, 0, 0.36)',
+            '--pulse-btn-active-bg': '#09090b',
+            '--pulse-btn-active-fg': '#ffffff',
+            '--pulse-btn-active-border': '#09090b',
+            '--pulse-btn-active-shadow':
+              '0 0 0 2px rgba(255, 255, 255, 0.96), 0 6px 18px rgba(0, 0, 0, 0.42)',
+            '--pulse-center-bg': '#09090b',
+            '--pulse-center-fg': '#ffffff',
+            '--pulse-center-border': '#ffffff',
+            '--pulse-center-shadow':
+              '0 0 0 2px #09090b, 0 8px 24px rgba(0, 0, 0, 0.42)',
+            '--pulse-center-hover-bg': '#18181b',
+            '--pulse-center-hover-fg': '#ffffff',
+            '--pulse-center-hover-border': '#ffffff',
+            '--pulse-center-seek-bg': 'rgba(255, 255, 255, 0.96)',
+            '--pulse-center-seek-fg': '#09090b',
+            '--pulse-center-seek-border': '#09090b',
+            '--pulse-dot-color': '#09090b',
+            '--pulse-menu-surface-bg': 'rgba(250, 250, 249, 0.97)',
+            '--pulse-menu-surface-fg': '#09090b',
+            '--pulse-menu-surface-border': 'rgba(9, 9, 11, 0.78)',
+            '--pulse-menu-hint': 'rgba(9, 9, 11, 0.68)',
+            '--pulse-menu-sep': 'rgba(9, 9, 11, 0.14)',
+            '--pulse-menu-hover-bg': 'rgba(9, 9, 11, 0.08)',
+            '--pulse-menu-accent': '#09090b',
+            '--pulse-menu-pill-bg': '#09090b',
+            '--pulse-menu-pill-fg': '#ffffff',
+            '--pulse-menu-item-active-bg': 'rgba(9, 9, 11, 0.1)',
+            '--pulse-menu-item-active-fg': '#09090b',
+            '--pulse-menu-icon': '#09090b',
+            '--pulse-switch-off-bg': 'rgba(9, 9, 11, 0.18)',
+            '--pulse-switch-off-border': 'rgba(9, 9, 11, 0.34)',
+            '--pulse-switch-on-bg': '#09090b',
+            '--pulse-switch-on-border': '#09090b',
+            '--pulse-switch-thumb': '#ffffff',
+          }
+        : {
+            '--pulse-btn-bg': 'rgba(250, 250, 249, 0.94)',
+            '--pulse-btn-fg': '#09090b',
+            '--pulse-btn-border': lightAdoptedBg,
+            '--pulse-btn-shadow':
+              `0 0 0 1px rgba(255, 255, 255, 0.92), 0 4px 12px rgba(0, 0, 0, 0.22)`,
+            '--pulse-btn-hover-bg': lightAdoptedBg,
+            '--pulse-btn-hover-fg': lightAdoptedFg,
+            '--pulse-btn-hover-border': lightAdoptedBg,
+            '--pulse-btn-hover-shadow':
+              `0 0 0 2px rgba(255, 255, 255, 0.92), 0 6px 16px rgba(${videoRgb}, 0.34)`,
+            '--pulse-btn-active-bg': lightAdoptedBg,
+            '--pulse-btn-active-fg': lightAdoptedFg,
+            '--pulse-btn-active-border': lightAdoptedBg,
+            '--pulse-btn-active-shadow':
+              `0 0 0 2px rgba(255, 255, 255, 0.94), 0 6px 18px rgba(${videoRgb}, 0.38)`,
+            '--pulse-center-bg': lightAdoptedBg,
+            '--pulse-center-fg': lightAdoptedFg,
+            '--pulse-center-border': '#ffffff',
+            '--pulse-center-shadow':
+              '0 0 0 2px #09090b, 0 8px 24px rgba(0, 0, 0, 0.4)',
+            '--pulse-center-hover-bg': '#09090b',
+            '--pulse-center-hover-fg': '#ffffff',
+            '--pulse-center-hover-border': lightAdoptedBg,
+            '--pulse-center-seek-bg': 'rgba(250, 250, 249, 0.94)',
+            '--pulse-center-seek-fg': '#09090b',
+            '--pulse-center-seek-border': lightAdoptedBg,
+            '--pulse-dot-color': lightAdoptedBg,
+            '--pulse-menu-surface-bg': 'rgba(250, 250, 249, 0.97)',
+            '--pulse-menu-surface-fg': '#09090b',
+            '--pulse-menu-surface-border': lightAdoptedBg,
+            '--pulse-menu-hint': 'rgba(9, 9, 11, 0.68)',
+            '--pulse-menu-sep': `rgba(${videoRgb}, 0.18)`,
+            '--pulse-menu-hover-bg': `rgba(${videoRgb}, 0.1)`,
+            '--pulse-menu-accent': lightAdoptedBg,
+            '--pulse-menu-pill-bg': lightAdoptedBg,
+            '--pulse-menu-pill-fg': lightAdoptedFg,
+            '--pulse-menu-item-active-bg': `rgba(${videoRgb}, 0.14)`,
+            '--pulse-menu-item-active-fg': lightAdoptedBg,
+            '--pulse-menu-icon': lightAdoptedBg,
+            '--pulse-switch-off-bg': 'rgba(9, 9, 11, 0.18)',
+            '--pulse-switch-off-border': 'rgba(9, 9, 11, 0.34)',
+            '--pulse-switch-on-bg': lightAdoptedBg,
+            '--pulse-switch-on-border': lightAdoptedBg,
+            '--pulse-switch-thumb': '#ffffff',
+          }
+      : isWhiteTone
+        ? {
+            '--pulse-btn-bg': 'rgba(9, 10, 14, 0.94)',
+            '--pulse-btn-fg': '#ffffff',
+            '--pulse-btn-border': 'rgba(255, 255, 255, 0.88)',
+            '--pulse-btn-shadow':
+              '0 0 0 1px rgba(0, 0, 0, 0.92), 0 4px 12px rgba(0, 0, 0, 0.72)',
+            '--pulse-btn-hover-bg': '#ffffff',
+            '--pulse-btn-hover-fg': '#09090b',
+            '--pulse-btn-hover-border': '#ffffff',
+            '--pulse-btn-hover-shadow':
+              '0 0 0 2px #09090b, 0 0 0 3.5px rgba(255, 255, 255, 0.78), 0 6px 18px rgba(0, 0, 0, 0.7)',
+            '--pulse-btn-active-bg': '#ffffff',
+            '--pulse-btn-active-fg': '#09090b',
+            '--pulse-btn-active-border': '#ffffff',
+            '--pulse-btn-active-shadow':
+              '0 0 0 2px #09090b, 0 0 0 3.5px rgba(255, 255, 255, 0.84), 0 6px 18px rgba(0, 0, 0, 0.72)',
+            '--pulse-center-bg': '#ffffff',
+            '--pulse-center-fg': '#09090b',
+            '--pulse-center-border': '#ffffff',
+            '--pulse-center-shadow':
+              '0 0 0 2px #09090b, 0 0 0 4px rgba(255, 255, 255, 0.72), 0 12px 28px rgba(0, 0, 0, 0.7)',
+            '--pulse-center-hover-bg': '#f4f4f5',
+            '--pulse-center-hover-fg': '#09090b',
+            '--pulse-center-hover-border': '#ffffff',
+            '--pulse-center-seek-bg': 'rgba(9, 10, 14, 0.94)',
+            '--pulse-center-seek-fg': '#ffffff',
+            '--pulse-center-seek-border': 'rgba(255, 255, 255, 0.9)',
+            '--pulse-dot-color': '#ffffff',
+            '--pulse-menu-surface-bg': 'rgba(9, 10, 14, 0.97)',
+            '--pulse-menu-surface-fg': '#ffffff',
+            '--pulse-menu-surface-border': 'rgba(255, 255, 255, 0.85)',
+            '--pulse-menu-hint': 'rgba(255, 255, 255, 0.78)',
+            '--pulse-menu-sep': 'rgba(255, 255, 255, 0.18)',
+            '--pulse-menu-hover-bg': 'rgba(255, 255, 255, 0.14)',
+            '--pulse-menu-accent': '#ffffff',
+            '--pulse-menu-pill-bg': '#ffffff',
+            '--pulse-menu-pill-fg': '#09090b',
+            '--pulse-menu-item-active-bg': 'rgba(255, 255, 255, 0.18)',
+            '--pulse-menu-item-active-fg': '#ffffff',
+            '--pulse-menu-icon': '#ffffff',
+            '--pulse-switch-off-bg': 'rgba(255, 255, 255, 0.14)',
+            '--pulse-switch-off-border': 'rgba(255, 255, 255, 0.35)',
+            '--pulse-switch-on-bg': '#ffffff',
+            '--pulse-switch-on-border': '#ffffff',
+            '--pulse-switch-thumb': '#09090b',
+          }
+        : {
+            '--pulse-btn-bg': 'rgba(10, 12, 16, 0.84)',
+            '--pulse-btn-fg': '#f8fafc',
+            '--pulse-btn-border': adaptiveBorder,
+            '--pulse-btn-shadow':
+              '0 2px 8px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
+            '--pulse-btn-hover-bg': `rgb(${videoRgb})`,
+            '--pulse-btn-hover-fg': adaptiveHoverFg,
+            '--pulse-btn-hover-border': adaptiveHoverBorder,
+            '--pulse-btn-hover-shadow': `0 0 0 1.5px rgba(${videoRgb}, 0.4), 0 6px 18px rgba(${videoRgb}, 0.34)`,
+            '--pulse-btn-active-bg': `rgba(${videoRgb}, 0.28)`,
+            '--pulse-btn-active-fg': adaptiveActiveFg,
+            '--pulse-btn-active-border': adaptiveHoverBorder,
+            '--pulse-btn-active-shadow': `0 0 0 1px rgba(${videoRgb}, 0.36), 0 0 16px rgba(${videoRgb}, 0.34)`,
+            '--pulse-center-bg': 'rgba(10, 12, 16, 0.82)',
+            '--pulse-center-fg': '#ffffff',
+            '--pulse-center-border': adaptiveHoverBorder,
+            '--pulse-center-shadow': `0 0 0 1px rgba(0, 0, 0, 0.48), 0 10px 26px rgba(0, 0, 0, 0.52), 0 0 18px rgba(${videoRgb}, 0.28)`,
+            '--pulse-center-hover-bg': `rgb(${videoRgb})`,
+            '--pulse-center-hover-fg': adaptiveHoverFg,
+            '--pulse-center-hover-border': adaptiveHoverBorder,
+            '--pulse-center-seek-bg': 'rgba(10, 12, 16, 0.8)',
+            '--pulse-center-seek-fg': '#ffffff',
+            '--pulse-center-seek-border': adaptiveBorder,
+            '--pulse-dot-color': adaptiveIconColor,
+            '--pulse-menu-surface-bg': 'rgba(11, 13, 18, 0.95)',
+            '--pulse-menu-surface-fg': '#f8fafc',
+            '--pulse-menu-surface-border': adaptiveBorder,
+            '--pulse-menu-hint': 'rgba(248, 250, 252, 0.72)',
+            '--pulse-menu-sep': `rgba(${videoRgb}, 0.18)`,
+            '--pulse-menu-hover-bg': `rgba(${videoRgb}, 0.14)`,
+            '--pulse-menu-accent': adaptiveIconColor,
+            '--pulse-menu-pill-bg': `rgb(${videoRgb})`,
+            '--pulse-menu-pill-fg': adaptiveHoverFg,
+            '--pulse-menu-item-active-bg': `rgba(${videoRgb}, 0.2)`,
+            '--pulse-menu-item-active-fg': adaptiveActiveFg,
+            '--pulse-menu-icon': adaptiveIconColor,
+            '--pulse-switch-off-bg': 'rgba(255, 255, 255, 0.12)',
+            '--pulse-switch-off-border': 'rgba(255, 255, 255, 0.24)',
+            '--pulse-switch-on-bg': `rgba(${videoRgb}, 0.36)`,
+            '--pulse-switch-on-border': adaptiveHoverBorder,
+            '--pulse-switch-thumb': '#ffffff',
+          };
+
     const videoBrightness =
       brightnessPct <= 75
         ? 0.25 + (brightnessPct / 75) * 0.75
@@ -524,6 +1087,9 @@ export function CadenceVideoSkin({
     const guardBrightness = flashGuard?.brightnessFactor ?? 1;
     const guardContrast = flashGuard?.contrastFactor ?? 1;
     const guardVeil = flashGuard?.veilOpacity ?? 0;
+    const isUltraRes =
+      selectedQuality.includes('2160p') || selectedQuality.includes('1440p');
+    const isFullHd = selectedQuality.includes('1080p');
     return {
       '--pulse-accent': activeAccent,
       '--pulse-accent-glow': hexToGlowRgba(activeAccent, 0.45),
@@ -534,11 +1100,26 @@ export function CadenceVideoSkin({
       '--pulse-guard-brightness': guardBrightness.toFixed(3),
       '--pulse-guard-contrast': guardContrast.toFixed(3),
       '--pulse-guard-veil': guardVeil.toFixed(3),
+      '--pulse-hires-contrast': isUltraRes ? '1.045' : isFullHd ? '1.02' : '1',
+      '--pulse-hires-saturate': isUltraRes ? '1.05' : isFullHd ? '1.02' : '1',
       '--pulse-cue-size': cueSize,
       '--pulse-cue-color': subtitleStyle.color,
       '--pulse-cue-bg': `rgba(10, 10, 13, ${subtitleStyle.bgOpacity})`,
+      ...btnVars,
     } as CSSProperties;
-  }, [activeAccent, ambientRgb, backdropMode, brightnessPct, flashGuard, subtitleStyle]);
+  }, [
+    accessibility.highContrast,
+    activeAccent,
+    ambientRgb,
+    backdropMode,
+    brightnessPct,
+    flashGuard,
+    isLightUi,
+    isWhiteTone,
+    selectedQuality,
+    subtitleStyle,
+    theme,
+  ]);
 
   const previewThumbUrl = muxPlaybackId
     ? `https://image.mux.com/${muxPlaybackId}/thumbnail.jpg?width=220`
@@ -632,9 +1213,10 @@ export function CadenceVideoSkin({
     }
 
     if (lower === keymap.captions.toLowerCase()) {
+      onSubtitleUserInteraction?.();
       showShortcutHint({
         keyLabel: formatShortcutUpper(keymap.captions),
-        actionLabel: 'Toggle Captions',
+        actionLabel: subtitlesActive ? 'Captions Off' : 'Captions On',
         icon: 'captions',
       });
       return;
@@ -747,7 +1329,9 @@ export function CadenceVideoSkin({
     <Container
       className={`cadence-skin ${className}`}
       style={skinStyle}
-      data-pulse-theme={theme === 'custom' ? 'amber' : theme}
+      data-pulse-theme={theme}
+      data-theme-mode={isLightUi ? 'light' : isWhiteTone ? 'contrast' : 'adaptive'}
+      data-backdrop={backdropMode}
       data-high-contrast={accessibility.highContrast ? 'true' : undefined}
       data-reduced-motion={accessibility.reducedMotion ? 'true' : undefined}
       data-reduced-transparency={accessibility.reducedTransparency ? 'true' : undefined}
@@ -789,6 +1373,31 @@ export function CadenceVideoSkin({
       <BufferingIndicator className="cadence-buffering">
         <div className="cadence-spinner" aria-hidden="true" />
       </BufferingIndicator>
+
+      {/* Pulse Custom High-Contrast Subtitle Cue Stage */}
+      {subtitlesActive && activeCueTexts.length > 0 && (
+        <div
+          className={`cadence-cue-stage ${
+            subtitleStyle.position === 'top'
+              ? 'cadence-cue-stage-top'
+              : 'cadence-cue-stage-bottom'
+          }`}
+          aria-live="polite"
+        >
+          {activeCueTexts.map((line, i) => (
+            <div
+              key={`${i}-${line}`}
+              onClick={subtitleStyle.pauseOnCueClick ? handleCueClick : undefined}
+              title={subtitleStyle.pauseOnCueClick ? 'Click cue to pause / resume' : undefined}
+              className={`cadence-cue-line cadence-cue-edge-${subtitleStyle.edgeStyle ?? 'box'} ${
+                subtitleStyle.pauseOnCueClick ? 'cadence-cue-clickable' : ''
+              }`}
+            >
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Double-Tap Left / Right Edge Ripple Overlay */}
       {edgeRipple && (
@@ -979,13 +1588,13 @@ export function CadenceVideoSkin({
 
         <Controls.Content className="cadence-controls-root">
           <Tooltip.Provider delay={200}>
-            {/* Top Bar: Video Title (Left) + Real-Time Status Bar & Tag Badge (Right) */}
+            {/* Top Bar: Video Title (Left) + Real-Time Status Bar (Right) */}
             <div className="cadence-top-bar">
               <div className="cadence-telemetry-pill">
                 <span className="cadence-telemetry-title">{title}</span>
               </div>
 
-              {(showSignalBattery || showTime || showInPlayerBadge) && (
+              {(showSignalBattery || showTime) && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   {/* Pill 1: Live Network Signal & Device Battery Percentage */}
                   {showSignalBattery && (
@@ -1059,17 +1668,6 @@ export function CadenceVideoSkin({
                       <span>{clockLabel}</span>
                     </div>
                   )}
-
-                  {showInPlayerBadge && (
-                    <div className="hidden md:block">
-                      <ChallengeTagBadge
-                        variant="glass"
-                        size="compact"
-                        copyable={false}
-                        tagSuffix="v10"
-                      />
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -1124,7 +1722,7 @@ export function CadenceVideoSkin({
             </div>
 
             {/* Contextual Floating Actions (Skip Intro / Resume / Next Up / Bookmark Feedback) */}
-            <div className="relative z-[3] px-4 pb-2 flex flex-wrap items-center justify-end gap-2 pointer-events-none">
+            <div className="cadence-floating-actions relative z-[3] px-4 pb-2 flex flex-wrap items-center justify-end gap-2 pointer-events-none">
               {bookmarkFeedback && (
                 <div className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-[#0C0E12]/90 border border-white/20 px-3 py-1.5 text-xs font-mono-tabular text-emerald-300 shadow-lg">
                   <BookmarkPlus className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1160,7 +1758,11 @@ export function CadenceVideoSkin({
                 <button
                   type="button"
                   onClick={onNextReel}
-                  className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-[#FF6B00] hover:opacity-95 px-3.5 py-2 text-xs font-semibold text-zinc-950 shadow-lg transition-transform active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-white"
+                  className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg hover:opacity-95 px-3.5 py-2 text-xs font-semibold shadow-lg transition-transform active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-white"
+                  style={{
+                    backgroundColor: 'var(--pulse-menu-pill-bg, #FF6B00)',
+                    color: 'var(--pulse-menu-pill-fg, #09090b)',
+                  }}
                 >
                   <span>Next in Queue</span>
                   <SkipForward className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1175,15 +1777,15 @@ export function CadenceVideoSkin({
                 {(playbackRate !== 1 ||
                   nightAudioMode !== 'off' ||
                   flashGuardMode !== 'off' ||
-                  (selectedQuality !== 'Auto' && !hasHlsRenditions) ||
+                  selectedQuality !== 'Auto' ||
                   bookmarks.length > 0) && (
-                  <div className="flex flex-wrap items-center gap-2 min-w-0 px-0.5 text-[11px] font-mono-tabular">
+                  <div className="cadence-dock-meta min-w-0 px-0.5 text-[11px] font-mono-tabular">
                     {playbackRate !== 1 && (
                       <span
-                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                        className="px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0"
                         style={{
                           backgroundColor: hexToGlowRgba(activeAccent, 0.2),
-                          color: activeAccent,
+                          color: isLightUi ? '#09090b' : activeAccent,
                         }}
                       >
                         {playbackRate}x SPEED
@@ -1191,19 +1793,27 @@ export function CadenceVideoSkin({
                     )}
                     {nightAudioMode !== 'off' && (
                       <span
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0"
                         style={{
-                          backgroundColor: 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.16)',
-                          borderColor: 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.5)',
-                          color: theme === 'light' ? '#111827' : '#ffffff',
+                          backgroundColor: isLightUi
+                            ? 'rgba(255, 255, 255, 0.9)'
+                            : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.16)',
+                          borderColor: isLightUi
+                            ? 'rgba(9, 9, 11, 0.45)'
+                            : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.5)',
+                          color: isLightUi ? '#09090b' : '#ffffff',
                         }}
                       >
-                        <Moon className="w-2.5 h-2.5" style={{ color: 'rgb(var(--pulse-video-rgb, 255, 107, 0))' }} aria-hidden="true" />
+                        <Moon
+                          className="w-2.5 h-2.5"
+                          style={{ color: isLightUi ? '#09090b' : 'var(--pulse-menu-accent, rgb(var(--pulse-video-rgb, 255, 107, 0)))' }}
+                          aria-hidden="true"
+                        />
                         <span>
                           {nightAudioMode === 'whisper' ? 'WHISPER COMPRESSOR' : 'VOICE ISOLATED'}
                         </span>
                         {nightCompressionDb < 0 && (
-                          <span className={theme === 'light' ? 'text-emerald-700' : 'text-emerald-300'}>
+                          <span className={isLightUi ? 'text-emerald-700' : 'text-emerald-300'}>
                             {nightCompressionDb.toFixed(1)}dB
                           </span>
                         )}
@@ -1211,21 +1821,25 @@ export function CadenceVideoSkin({
                     )}
                     {flashGuardMode !== 'off' && (
                       <span
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0"
                         style={{
                           backgroundColor: flashGuard?.activeAlert
                             ? 'rgba(16, 185, 129, 0.22)'
-                            : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.14)',
+                            : isLightUi
+                              ? 'rgba(255, 255, 255, 0.9)'
+                              : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.14)',
                           borderColor: flashGuard?.activeAlert
                             ? 'rgba(16, 185, 129, 0.65)'
-                            : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.45)',
-                          color: theme === 'light' ? '#111827' : '#ffffff',
+                            : isLightUi
+                              ? 'rgba(9, 9, 11, 0.45)'
+                              : 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.45)',
+                          color: isLightUi ? '#09090b' : '#ffffff',
                         }}
                       >
                         <ShieldCheck
                           className={`w-2.5 h-2.5 ${
                             flashGuard?.activeAlert
-                              ? theme === 'light'
+                              ? isLightUi
                                 ? 'text-emerald-700'
                                 : 'text-emerald-300'
                               : ''
@@ -1233,7 +1847,7 @@ export function CadenceVideoSkin({
                           style={
                             flashGuard?.activeAlert
                               ? undefined
-                              : { color: 'rgb(var(--pulse-video-rgb, 255, 107, 0))' }
+                              : { color: isLightUi ? '#09090b' : 'var(--pulse-menu-accent, rgb(var(--pulse-video-rgb, 255, 107, 0)))' }
                           }
                           aria-hidden="true"
                         />
@@ -1241,7 +1855,7 @@ export function CadenceVideoSkin({
                           {flashGuardMode === 'strict' ? 'FLASH GUARD · STRICT' : 'FLASH GUARD'}
                         </span>
                         {flashGuard && flashGuard.attenuationPct > 0 ? (
-                          <span className={theme === 'light' ? 'text-emerald-700' : 'text-emerald-300'}>
+                          <span className={isLightUi ? 'text-emerald-700' : 'text-emerald-300'}>
                             -{flashGuard.attenuationPct}%
                           </span>
                         ) : flashGuard && flashGuard.dampenedCount > 0 ? (
@@ -1251,8 +1865,8 @@ export function CadenceVideoSkin({
                         ) : null}
                       </span>
                     )}
-                    {selectedQuality !== 'Auto' && !hasHlsRenditions && (
-                      <span className="opacity-75">{selectedQuality}</span>
+                    {selectedQuality !== 'Auto' && (
+                      <span className="opacity-85 font-semibold">{selectedQuality}</span>
                     )}
                     {bookmarks.length > 0 && (
                       <span className="opacity-70 hidden md:inline">
@@ -1283,7 +1897,7 @@ export function CadenceVideoSkin({
                         render={(props) => (
                           <button
                             {...props}
-                            className="cadence-btn"
+                            className="cadence-btn cadence-hide-xs"
                             aria-label="Reverse 10 seconds"
                           >
                             <Rewind className="w-[17px] h-[17px]" strokeWidth={1.8} aria-hidden="true" />
@@ -1322,7 +1936,7 @@ export function CadenceVideoSkin({
                         render={(props) => (
                           <button
                             {...props}
-                            className="cadence-btn"
+                            className="cadence-btn cadence-hide-xs"
                             aria-label="Forward 10 seconds"
                           >
                             <FastForward className="w-[17px] h-[17px]" strokeWidth={1.8} aria-hidden="true" />
@@ -1351,17 +1965,21 @@ export function CadenceVideoSkin({
                           render={
                             <MuteButton
                               render={(props, state) => (
-                                <button {...props} className="cadence-btn">
+                                <button
+                                  {...props}
+                                  className="cadence-btn"
+                                  data-active={state.muted || state.volumeLevel === 'off' ? '' : undefined}
+                                >
                                   {state.muted || state.volumeLevel === 'off' ? (
                                     <VolumeX
                                       className="w-[18px] h-[18px]"
-                                      style={{ color: activeAccent }}
+                                      strokeWidth={2}
                                       aria-hidden="true"
                                     />
                                   ) : state.volumeLevel === 'low' ? (
-                                    <Volume1 className="w-[18px] h-[18px]" aria-hidden="true" />
+                                    <Volume1 className="w-[18px] h-[18px]" strokeWidth={2} aria-hidden="true" />
                                   ) : (
-                                    <Volume2 className="w-[18px] h-[18px]" aria-hidden="true" />
+                                    <Volume2 className="w-[18px] h-[18px]" strokeWidth={2} aria-hidden="true" />
                                   )}
                                 </button>
                               )}
@@ -1462,26 +2080,441 @@ export function CadenceVideoSkin({
                       </button>
                     </ControlTooltip>
 
-                    <ControlTooltip
-                      label="Captions"
-                      shortcut={formatShortcutUpper(keymap.captions)}
+                    {/* Subtitles & Captions Studio Button + Extra Functions Popover */}
+                    <Popover.Root
+                      open={subtitlesOpen}
+                      onOpenChange={setSubtitlesOpen}
+                      side="top"
+                      align="end"
                     >
-                      <CaptionsButton
-                        render={(props, state) => (
-                          <button
-                            {...props}
-                            className="cadence-btn cadence-hide-compact"
-                            data-active={state.subtitlesShowing ? '' : undefined}
-                          >
-                            {state.subtitlesShowing ? (
-                              <Captions className="w-[18px] h-[18px]" aria-hidden="true" />
-                            ) : (
-                              <CaptionsOff className="w-[18px] h-[18px] opacity-85" aria-hidden="true" />
-                            )}
-                          </button>
-                        )}
-                      />
-                    </ControlTooltip>
+                      <ControlTooltip
+                        label={subtitlesActive ? 'Subtitles On · Studio' : 'Subtitles & Studio'}
+                        shortcut={formatShortcutUpper(keymap.captions)}
+                      >
+                        <Popover.Trigger
+                          render={
+                            <button
+                              type="button"
+                              className="cadence-btn"
+                              data-active={subtitlesActive || subtitlesOpen ? '' : undefined}
+                              aria-pressed={subtitlesActive}
+                              aria-expanded={subtitlesOpen}
+                              aria-label="Subtitles and caption studio"
+                            >
+                              {subtitlesActive ? (
+                                <Captions className="w-[18px] h-[18px]" strokeWidth={2} aria-hidden="true" />
+                              ) : (
+                                <CaptionsOff className="w-[18px] h-[18px]" strokeWidth={2} aria-hidden="true" />
+                              )}
+                              {subtitlesActive && (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#10b981]"
+                                />
+                              )}
+                            </button>
+                          }
+                        />
+                      </ControlTooltip>
+
+                      <Popover.Popup className="cadence-subtitles-popup">
+                        <div className="cadence-subtitles-panel">
+                          {/* Studio Header + One-Click Master Toggle */}
+                          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-current/12">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                                <Captions
+                                  className="w-3.5 h-3.5 shrink-0"
+                                  style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }}
+                                  aria-hidden="true"
+                                />
+                                <span>Subtitles Studio</span>
+                              </div>
+                              <p className="text-[10.5px] opacity-75 truncate mt-0.5 font-mono-tabular">
+                                {subtitlesActive
+                                  ? `${activeSubtitleTrack?.label}${subtitleStyle.syncOffsetSec !== 0 ? ` · ${subtitleStyle.syncOffsetSec > 0 ? '+' : ''}${subtitleStyle.syncOffsetSec.toFixed(2)}s` : ''}`
+                                  : 'Off · Press C to toggle'}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleToggleSubtitlesMaster}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer shrink-0"
+                              style={{
+                                backgroundColor: subtitlesActive
+                                  ? 'var(--pulse-menu-pill-bg, #FF6B00)'
+                                  : 'rgba(128, 128, 128, 0.16)',
+                                borderColor: subtitlesActive
+                                  ? 'var(--pulse-menu-pill-bg, #FF6B00)'
+                                  : 'rgba(128, 128, 128, 0.35)',
+                                color: subtitlesActive
+                                  ? 'var(--pulse-menu-pill-fg, #09090b)'
+                                  : 'inherit',
+                              }}
+                            >
+                              {subtitlesActive ? 'ON' : 'OFF'}
+                            </button>
+                          </div>
+
+                          {/* Mode Tabs: Controls vs Live Transcript */}
+                          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-current/8 border border-current/15 my-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setSubtitlesTab('controls')}
+                              className={`py-1.5 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                                subtitlesTab === 'controls'
+                                  ? 'cadence-sub-tab-active shadow-sm'
+                                  : 'opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              Track &amp; Style
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSubtitlesTab('transcript')}
+                              className={`inline-flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                                subtitlesTab === 'transcript'
+                                  ? 'cadence-sub-tab-active shadow-sm'
+                                  : 'opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <FileText className="w-3 h-3" aria-hidden="true" />
+                              <span>Transcript ({activeTrackCues.length})</span>
+                            </button>
+                          </div>
+
+                          {subtitlesTab === 'controls' ? (
+                            <div className="space-y-3 text-[11px]">
+                              {/* Language / Track Selector */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium opacity-80">Subtitle Track</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => subtitleFileInputRef.current?.click()}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-current/25 bg-current/8 hover:bg-current/15 text-[10.5px] font-semibold cursor-pointer"
+                                  >
+                                    <Upload className="w-3 h-3" aria-hidden="true" />
+                                    <span>{subtitleUploadMsg ?? 'Load .vtt/.srt'}</span>
+                                  </button>
+                                  <input
+                                    ref={subtitleFileInputRef}
+                                    type="file"
+                                    accept=".vtt,.srt,text/vtt"
+                                    onChange={handleSubtitleFileUpload}
+                                    className="hidden"
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSubtitleTrackMode(null)}
+                                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                        !subtitlesActive
+                                          ? 'border-current/45 bg-current/12 font-semibold'
+                                          : 'border-transparent hover:bg-current/8 opacity-80'
+                                      }`}
+                                    >
+                                      <span>Off (Disabled)</span>
+                                      {!subtitlesActive && (
+                                        <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
+                                      )}
+                                    </button>
+                                    {discoveredTracks.map((tr) => {
+                                      const selected = tr.mode === 'showing';
+                                      return (
+                                        <button
+                                          key={`${tr.index}-${tr.label}`}
+                                          type="button"
+                                          onClick={() => setSubtitleTrackMode(tr.index)}
+                                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                            selected
+                                              ? 'border-current/45 bg-current/12 font-semibold'
+                                              : 'border-transparent hover:bg-current/8 opacity-85'
+                                          }`}
+                                        >
+                                          <span className="truncate">{tr.label}</span>
+                                          {selected && (
+                                            <Check className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+
+                              {/* Timing Sync Offset (-2.0s to +2.0s) */}
+                              <div className="pt-2 border-t border-current/12 flex items-center justify-between gap-2">
+                                <div>
+                                  <span className="block font-medium">Timing Sync</span>
+                                  <span className="text-[10px] opacity-70">Nudge early / late</span>
+                                </div>
+                                <div className="inline-flex items-center gap-1 rounded-lg bg-current/8 border border-current/20 p-0.5 font-mono-tabular">
+                                  <button
+                                    type="button"
+                                    aria-label="Delay subtitles by 0.25 seconds"
+                                    onClick={() =>
+                                      onUpdateSubtitleStyle?.({
+                                        syncOffsetSec: Math.max(
+                                          -2,
+                                          Math.round(((subtitleStyle.syncOffsetSec ?? 0) - 0.25) * 100) / 100
+                                        ),
+                                      })
+                                    }
+                                    className="p-1 rounded hover:bg-current/15 cursor-pointer"
+                                  >
+                                    <Minus className="w-3 h-3" aria-hidden="true" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Click to reset sync offset to 0.00s"
+                                    onClick={() => onUpdateSubtitleStyle?.({ syncOffsetSec: 0 })}
+                                    className="px-1.5 text-[10.5px] font-semibold min-w-[48px] text-center cursor-pointer"
+                                  >
+                                    {(subtitleStyle.syncOffsetSec ?? 0) > 0 ? '+' : ''}
+                                    {(subtitleStyle.syncOffsetSec ?? 0).toFixed(2)}s
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="Advance subtitles by 0.25 seconds"
+                                    onClick={() =>
+                                      onUpdateSubtitleStyle?.({
+                                        syncOffsetSec: Math.min(
+                                          2,
+                                          Math.round(((subtitleStyle.syncOffsetSec ?? 0) + 0.25) * 100) / 100
+                                        ),
+                                      })
+                                    }
+                                    className="p-1 rounded hover:bg-current/15 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" aria-hidden="true" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Position (Bottom / Top) & Font Size */}
+                              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-current/12">
+                                <div>
+                                  <span className="block opacity-75 mb-1">Position</span>
+                                  <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                    <button
+                                      type="button"
+                                      onClick={() => onUpdateSubtitleStyle?.({ position: 'bottom' })}
+                                      className={`inline-flex items-center justify-center gap-1 py-1 rounded text-[10.5px] font-medium cursor-pointer ${
+                                        (subtitleStyle.position ?? 'bottom') === 'bottom'
+                                          ? 'cadence-sub-tab-active font-semibold shadow-xs'
+                                          : 'opacity-80 hover:opacity-100'
+                                      }`}
+                                    >
+                                      <ArrowDownToLine className="w-3 h-3" aria-hidden="true" />
+                                      <span>Bottom</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => onUpdateSubtitleStyle?.({ position: 'top' })}
+                                      className={`inline-flex items-center justify-center gap-1 py-1 rounded text-[10.5px] font-medium cursor-pointer ${
+                                        subtitleStyle.position === 'top'
+                                          ? 'cadence-sub-tab-active font-semibold shadow-xs'
+                                          : 'opacity-80 hover:opacity-100'
+                                      }`}
+                                    >
+                                      <ArrowUpToLine className="w-3 h-3" aria-hidden="true" />
+                                      <span>Top</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <span className="block opacity-75 mb-1">Size</span>
+                                  <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                    {(['sm', 'md', 'lg'] as const).map((sz) => (
+                                      <button
+                                        key={sz}
+                                        type="button"
+                                        onClick={() => onUpdateSubtitleStyle?.({ fontSize: sz })}
+                                        className={`py-1 rounded text-[10.5px] font-mono-tabular uppercase cursor-pointer ${
+                                          subtitleStyle.fontSize === sz
+                                            ? 'cadence-sub-tab-active font-semibold shadow-xs'
+                                            : 'opacity-80 hover:opacity-100'
+                                        }`}
+                                      >
+                                        {sz}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Edge Style */}
+                              <div>
+                                <span className="block opacity-75 mb-1">Edge Style</span>
+                                <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                  {(
+                                    [
+                                      { id: 'box', label: 'Box' },
+                                      { id: 'outline', label: 'Outline' },
+                                      { id: 'shadow', label: 'Shadow' },
+                                      { id: 'clean', label: 'Clean' },
+                                    ] as { id: SubtitleEdgeStyle; label: string }[]
+                                  ).map((edge) => (
+                                    <button
+                                      key={edge.id}
+                                      type="button"
+                                      onClick={() => onUpdateSubtitleStyle?.({ edgeStyle: edge.id })}
+                                      className={`py-1 rounded text-[10.5px] font-medium cursor-pointer ${
+                                        (subtitleStyle.edgeStyle ?? 'box') === edge.id
+                                          ? 'cadence-sub-tab-active font-semibold shadow-xs'
+                                          : 'opacity-80 hover:opacity-100'
+                                      }`}
+                                    >
+                                      {edge.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Color & Background Opacity */}
+                              <div className="grid grid-cols-2 gap-2 items-center">
+                                <div>
+                                  <span className="block opacity-75 mb-1">Text Color</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {(['#F8FAFC', '#FDE047', '#10F56E'] as const).map((c) => (
+                                      <button
+                                        key={c}
+                                        type="button"
+                                        aria-label={`Subtitle text color ${c}`}
+                                        onClick={() => onUpdateSubtitleStyle?.({ color: c })}
+                                        className={`w-6 h-6 rounded-md border cursor-pointer ${
+                                          subtitleStyle.color === c
+                                            ? 'border-zinc-950 ring-2 ring-current'
+                                            : 'border-black/30 opacity-85'
+                                        }`}
+                                        style={{ backgroundColor: c }}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label
+                                    htmlFor="hud-cue-opacity"
+                                    className="flex items-center justify-between opacity-75 mb-1"
+                                  >
+                                    <span>Bg Opacity</span>
+                                    <span className="font-mono-tabular">
+                                      {Math.round(subtitleStyle.bgOpacity * 100)}%
+                                    </span>
+                                  </label>
+                                  <input
+                                    id="hud-cue-opacity"
+                                    type="range"
+                                    min={0.3}
+                                    max={1}
+                                    step={0.05}
+                                    value={subtitleStyle.bgOpacity}
+                                    onChange={(e) =>
+                                      onUpdateSubtitleStyle?.({
+                                        bgOpacity: parseFloat(e.target.value),
+                                      })
+                                    }
+                                    style={{ accentColor: 'var(--pulse-menu-accent, #FF6B00)' }}
+                                    className="w-full cursor-pointer"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Click Cue to Pause + Reset */}
+                              <div className="pt-2 border-t border-current/12 flex items-center justify-between gap-2">
+                                <label className="inline-flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(subtitleStyle.pauseOnCueClick)}
+                                    onChange={(e) =>
+                                      onUpdateSubtitleStyle?.({
+                                        pauseOnCueClick: e.target.checked,
+                                      })
+                                    }
+                                    style={{ accentColor: 'var(--pulse-menu-accent, #FF6B00)' }}
+                                    className="rounded cursor-pointer"
+                                  />
+                                  <span>Click cue to pause</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateSubtitleStyle?.(DEFAULT_SUBTITLE_STYLE)}
+                                  className="text-[10.5px] opacity-75 hover:opacity-100 underline cursor-pointer"
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Tab 2: Interactive Timestamped Live Transcript */
+                            <div className="space-y-2.5 text-[11px]">
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleCopyTranscript}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-current/8 border border-current/20 hover:bg-current/15 cursor-pointer"
+                                >
+                                  <Copy className="w-3 h-3" aria-hidden="true" />
+                                  <span>{transcriptCopied ? 'Copied!' : 'Copy All'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleDownloadVtt}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-current/8 border border-current/20 hover:bg-current/15 cursor-pointer"
+                                >
+                                  <Download className="w-3 h-3" aria-hidden="true" />
+                                  <span>Export .vtt</span>
+                                </button>
+                              </div>
+
+                              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                                {activeTrackCues.length === 0 ? (
+                                  <p className="py-6 text-center opacity-65">
+                                    No cues available for this track.
+                                  </p>
+                                ) : (
+                                  activeTrackCues.map((cue, idx) => {
+                                    const isCurrent =
+                                      effectiveSubtitleTime >= cue.start &&
+                                      effectiveSubtitleTime <= cue.end;
+                                    return (
+                                      <button
+                                        key={`${idx}-${cue.start}`}
+                                        type="button"
+                                        onClick={() => {
+                                          onJumpToTime(cue.start);
+                                          if (!subtitlesActive && discoveredTracks.length > 0) {
+                                            setSubtitleTrackMode(0);
+                                          }
+                                        }}
+                                        className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                                          isCurrent
+                                            ? 'bg-current/15 font-semibold'
+                                            : 'hover:bg-current/8 opacity-85'
+                                        }`}
+                                      >
+                                        <span
+                                          className="font-mono-tabular text-[10px] shrink-0 pt-0.5"
+                                          style={{ color: isCurrent ? 'var(--pulse-menu-accent, var(--pulse-accent))' : undefined }}
+                                        >
+                                          {formatTimecode(cue.start)}
+                                        </span>
+                                        <span className="leading-snug">{cue.text}</span>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </Popover.Popup>
+                    </Popover.Root>
 
                     {/* Settings Menu: Speed, Quality/Resolution, Captions, Theme */}
                     <Menu.Root side="top" align="end">
@@ -1501,7 +2534,7 @@ export function CadenceVideoSkin({
                             <PlaybackRateRadioGroup.Root>
                               <Menu.Trigger className="cadence-menu-item">
                                 <span className="inline-flex items-center gap-2">
-                                  <Gauge className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                                  <Gauge className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                                   <span>Speed</span>
                                 </span>
                                 <span className="cadence-menu-hint">
@@ -1522,7 +2555,7 @@ export function CadenceVideoSkin({
                                     <Menu.RadioItem {...props} className="cadence-menu-radio-item">
                                       <span>{item.label}</span>
                                       <Menu.ItemIndicator>
-                                        <Check className="w-3.5 h-3.5" style={{ color: activeAccent }} aria-hidden="true" />
+                                        <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
                                       </Menu.ItemIndicator>
                                     </Menu.RadioItem>
                                   )}
@@ -1537,11 +2570,15 @@ export function CadenceVideoSkin({
                               <QualityRadioGroup.Root>
                                 <Menu.Trigger className="cadence-menu-item">
                                   <span className="inline-flex items-center gap-2">
-                                    <Tv className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                                    <Tv className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                                     <span>Quality</span>
                                   </span>
                                   <span className="cadence-menu-hint">
-                                    <QualityRadioGroup.Value />
+                                    {selectedQuality !== 'Auto' ? (
+                                      <span>{selectedQuality}</span>
+                                    ) : (
+                                      <QualityRadioGroup.Value />
+                                    )}
                                     <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
                                   </span>
                                 </Menu.Trigger>
@@ -1553,12 +2590,53 @@ export function CadenceVideoSkin({
                                     </span>
                                   </Menu.Item>
                                   <Menu.Separator className="cadence-menu-sep" />
+                                  {extraHighResProfiles.map((profile) => {
+                                    const isActiveProfile = selectedQuality === profile.label;
+                                    return (
+                                      <Menu.Item
+                                        key={profile.label}
+                                        className="cadence-menu-radio-item"
+                                        aria-checked={isActiveProfile}
+                                        onClick={() => handleSelectHighResProfile(profile.label)}
+                                      >
+                                        <span className="inline-flex items-center gap-2">
+                                          <span>{profile.label}</span>
+                                          <span
+                                            className="px-1.5 py-0.5 rounded text-[9.5px] font-mono-tabular font-bold border border-current/25 opacity-85"
+                                            style={
+                                              isActiveProfile
+                                                ? {
+                                                    color: 'var(--pulse-menu-accent, var(--pulse-accent))',
+                                                    borderColor: 'var(--pulse-menu-accent, var(--pulse-accent))',
+                                                  }
+                                                : undefined
+                                            }
+                                          >
+                                            {profile.badge}
+                                          </span>
+                                        </span>
+                                        {isActiveProfile && (
+                                          <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
+                                        )}
+                                      </Menu.Item>
+                                    );
+                                  })}
+                                  {extraHighResProfiles.length > 0 && (
+                                    <Menu.Separator className="cadence-menu-sep" />
+                                  )}
                                   <QualityRadioGroup.Options
                                     renderItem={(props, item) => (
-                                      <Menu.RadioItem {...props} className="cadence-menu-radio-item">
+                                      <Menu.RadioItem
+                                        {...props}
+                                        onClick={(e) => {
+                                          onSelectQuality('Auto');
+                                          props.onClick?.(e);
+                                        }}
+                                        className="cadence-menu-radio-item"
+                                      >
                                         <span>{item.label}</span>
                                         <Menu.ItemIndicator>
-                                          <Check className="w-3.5 h-3.5" style={{ color: activeAccent }} aria-hidden="true" />
+                                          <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
                                         </Menu.ItemIndicator>
                                       </Menu.RadioItem>
                                     )}
@@ -1574,7 +2652,7 @@ export function CadenceVideoSkin({
                               >
                                 <Menu.Trigger className="cadence-menu-item">
                                   <span className="inline-flex items-center gap-2">
-                                    <Tv className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                                    <Tv className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                                     <span>Quality</span>
                                   </span>
                                   <span className="cadence-menu-hint">
@@ -1590,18 +2668,35 @@ export function CadenceVideoSkin({
                                     </span>
                                   </Menu.Item>
                                   <Menu.Separator className="cadence-menu-sep" />
-                                  {QUALITY_TIERS.map((q) => (
-                                    <Menu.RadioItem
-                                      key={q}
-                                      value={q}
-                                      className="cadence-menu-radio-item"
-                                    >
-                                      <span>{q}</span>
-                                      <Menu.ItemIndicator>
-                                        <Check className="w-3.5 h-3.5" style={{ color: activeAccent }} aria-hidden="true" />
-                                      </Menu.ItemIndicator>
-                                    </Menu.RadioItem>
-                                  ))}
+                                  {QUALITY_TIERS.map((q) => {
+                                    const badge =
+                                      q === '4K (2160p)'
+                                        ? 'UHD'
+                                        : q === '1440p (2K)'
+                                          ? 'QHD'
+                                          : q === '1080p'
+                                            ? 'FHD'
+                                            : null;
+                                    return (
+                                      <Menu.RadioItem
+                                        key={q}
+                                        value={q}
+                                        className="cadence-menu-radio-item"
+                                      >
+                                        <span className="inline-flex items-center gap-2">
+                                          <span>{q}</span>
+                                          {badge && (
+                                            <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono-tabular font-bold border border-current/25 opacity-80">
+                                              {badge}
+                                            </span>
+                                          )}
+                                        </span>
+                                        <Menu.ItemIndicator>
+                                          <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
+                                        </Menu.ItemIndicator>
+                                      </Menu.RadioItem>
+                                    );
+                                  })}
                                 </Menu.Content>
                               </Menu.RadioGroup>
                             </Menu.Root>
@@ -1612,7 +2707,7 @@ export function CadenceVideoSkin({
                             <CaptionsRadioGroup.Root>
                               <Menu.Trigger className="cadence-menu-item">
                                 <span className="inline-flex items-center gap-2">
-                                  <Captions className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                                  <Captions className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                                   <span>Captions</span>
                                 </span>
                                 <span className="cadence-menu-hint">
@@ -1633,7 +2728,7 @@ export function CadenceVideoSkin({
                                     <Menu.RadioItem {...props} className="cadence-menu-radio-item">
                                       <span>{item.label}</span>
                                       <Menu.ItemIndicator>
-                                        <Check className="w-3.5 h-3.5" style={{ color: activeAccent }} aria-hidden="true" />
+                                        <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
                                       </Menu.ItemIndicator>
                                     </Menu.RadioItem>
                                   )}
@@ -1650,7 +2745,7 @@ export function CadenceVideoSkin({
                             >
                               <Menu.Trigger className="cadence-menu-item">
                                 <span className="inline-flex items-center gap-2">
-                                  <Palette className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                                  <Palette className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                                   <span>Theme</span>
                                 </span>
                                 <span className="cadence-menu-hint">
@@ -1666,7 +2761,7 @@ export function CadenceVideoSkin({
                                   </span>
                                 </Menu.Item>
                                 <Menu.Separator className="cadence-menu-sep" />
-                                  {(['amber', 'oscilloscope', 'light', 'custom'] as const).map((t) => (
+                                {(['amber', 'oscilloscope', 'light', 'custom'] as const).map((t) => (
                                   <Menu.RadioItem
                                     key={t}
                                     value={t}
@@ -1674,7 +2769,7 @@ export function CadenceVideoSkin({
                                   >
                                     <span>{THEME_LABELS[t]}</span>
                                     <Menu.ItemIndicator>
-                                      <Check className="w-3.5 h-3.5" style={{ color: activeAccent }} aria-hidden="true" />
+                                      <Check className="w-3.5 h-3.5" style={{ color: 'var(--pulse-menu-accent, var(--pulse-accent))' }} aria-hidden="true" />
                                     </Menu.ItemIndicator>
                                   </Menu.RadioItem>
                                 ))}
@@ -1695,7 +2790,7 @@ export function CadenceVideoSkin({
                             }
                           >
                             <span className="inline-flex items-center gap-2">
-                              <Moon className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <Moon className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Night Whisper</span>
                             </span>
                             <span
@@ -1704,37 +2799,37 @@ export function CadenceVideoSkin({
                               style={{
                                 backgroundColor:
                                   nightAudioMode !== 'off'
-                                    ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                    : theme === 'light'
-                                      ? 'rgba(17, 24, 39, 0.16)'
-                                      : 'rgba(255, 255, 255, 0.12)',
+                                    ? 'var(--pulse-switch-on-bg)'
+                                    : 'var(--pulse-switch-off-bg)',
                                 borderColor:
                                   nightAudioMode !== 'off'
-                                    ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                    : theme === 'light'
-                                      ? 'rgba(17, 24, 39, 0.28)'
-                                      : 'rgba(255, 255, 255, 0.22)',
-                                boxShadow:
-                                  nightAudioMode !== 'off'
-                                    ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
-                                    : 'none',
+                                    ? 'var(--pulse-switch-on-border)'
+                                    : 'var(--pulse-switch-off-border)',
                               }}
                             >
                               <span
-                                className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                                className={`w-3.5 h-3.5 rounded-full shadow transition-transform duration-200 ${
                                   nightAudioMode !== 'off' ? 'translate-x-4' : 'translate-x-0'
                                 }`}
+                                style={{
+                                  backgroundColor:
+                                    nightAudioMode !== 'off'
+                                      ? 'var(--pulse-switch-thumb, #ffffff)'
+                                      : '#ffffff',
+                                }}
                               />
                             </span>
                           </Menu.CheckboxItem>
 
                           {nightAudioMode !== 'off' && (
                             <div
-                              className={`px-2 py-1.5 rounded-xl border space-y-2 ${
-                                theme === 'light'
-                                  ? 'bg-black/[0.05] border-black/10'
-                                  : 'bg-white/[0.04] border-white/10'
-                              }`}
+                              className="px-2 py-1.5 rounded-xl border space-y-2"
+                              style={{
+                                backgroundColor: isLightUi
+                                  ? 'rgba(9, 9, 11, 0.05)'
+                                  : 'rgba(255, 255, 255, 0.04)',
+                                borderColor: 'var(--pulse-menu-sep)',
+                              }}
                             >
                               <div className="grid grid-cols-2 gap-1">
                                 <button
@@ -1743,24 +2838,18 @@ export function CadenceVideoSkin({
                                     e.stopPropagation();
                                     onChangeNightAudioMode?.('voice');
                                   }}
-                                  className={`px-2 py-1 rounded-lg text-[10.5px] font-medium transition-colors cursor-pointer ${
-                                    nightAudioMode === 'voice'
-                                      ? theme === 'light'
-                                        ? 'text-zinc-950 font-semibold'
-                                        : 'text-white font-semibold'
-                                      : theme === 'light'
-                                        ? 'text-zinc-600 hover:text-zinc-950'
-                                        : 'text-zinc-400 hover:text-white'
-                                  }`}
+                                  className="px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-colors cursor-pointer"
                                   style={
                                     nightAudioMode === 'voice'
                                       ? {
-                                          backgroundColor:
-                                            'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.28)',
-                                          border:
-                                            '1px solid rgba(var(--pulse-video-rgb, 255, 107, 0), 0.75)',
+                                          backgroundColor: 'var(--pulse-menu-pill-bg)',
+                                          color: 'var(--pulse-menu-pill-fg)',
+                                          border: '1px solid var(--pulse-menu-pill-bg)',
                                         }
-                                      : { border: '1px solid transparent' }
+                                      : {
+                                          border: '1px solid transparent',
+                                          opacity: 0.78,
+                                        }
                                   }
                                 >
                                   Voice Isolate
@@ -1771,44 +2860,34 @@ export function CadenceVideoSkin({
                                     e.stopPropagation();
                                     onChangeNightAudioMode?.('whisper');
                                   }}
-                                  className={`px-2 py-1 rounded-lg text-[10.5px] font-medium transition-colors cursor-pointer ${
-                                    nightAudioMode === 'whisper'
-                                      ? theme === 'light'
-                                        ? 'text-zinc-950 font-semibold'
-                                        : 'text-white font-semibold'
-                                      : theme === 'light'
-                                        ? 'text-zinc-600 hover:text-zinc-950'
-                                        : 'text-zinc-400 hover:text-white'
-                                  }`}
+                                  className="px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-colors cursor-pointer"
                                   style={
                                     nightAudioMode === 'whisper'
                                       ? {
-                                          backgroundColor:
-                                            'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.28)',
-                                          border:
-                                            '1px solid rgba(var(--pulse-video-rgb, 255, 107, 0), 0.75)',
+                                          backgroundColor: 'var(--pulse-menu-pill-bg)',
+                                          color: 'var(--pulse-menu-pill-fg)',
+                                          border: '1px solid var(--pulse-menu-pill-bg)',
                                         }
-                                      : { border: '1px solid transparent' }
+                                      : {
+                                          border: '1px solid transparent',
+                                          opacity: 0.78,
+                                        }
                                   }
                                 >
                                   Whisper Max
                                 </button>
                               </div>
-                              <div
-                                className={`flex items-center justify-between gap-2 text-[10px] font-mono-tabular ${
-                                  theme === 'light' ? 'text-zinc-600' : 'text-zinc-400'
-                                }`}
-                              >
+                              <div className="flex items-center justify-between gap-2 text-[10px] font-mono-tabular opacity-85">
                                 <span className="inline-flex items-center gap-1">
                                   <AudioLines
-                                    className={`w-3 h-3 ${theme === 'light' ? 'text-emerald-600' : 'text-emerald-400'}`}
+                                    className={`w-3 h-3 ${isLightUi ? 'text-emerald-700' : 'text-emerald-400'}`}
                                     aria-hidden="true"
                                   />
                                   <span>Peak Taming</span>
                                 </span>
                                 <span
                                   className={`font-semibold ${
-                                    theme === 'light' ? 'text-emerald-700' : 'text-emerald-300'
+                                    isLightUi ? 'text-emerald-700' : 'text-emerald-300'
                                   }`}
                                 >
                                   {nightCompressionDb < 0
@@ -1830,7 +2909,7 @@ export function CadenceVideoSkin({
                             }
                           >
                             <span className="inline-flex items-center gap-2">
-                              <ShieldCheck className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <ShieldCheck className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Flash Guard</span>
                             </span>
                             <span
@@ -1839,37 +2918,37 @@ export function CadenceVideoSkin({
                               style={{
                                 backgroundColor:
                                   flashGuardMode !== 'off'
-                                    ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                    : theme === 'light'
-                                      ? 'rgba(17, 24, 39, 0.16)'
-                                      : 'rgba(255, 255, 255, 0.12)',
+                                    ? 'var(--pulse-switch-on-bg)'
+                                    : 'var(--pulse-switch-off-bg)',
                                 borderColor:
                                   flashGuardMode !== 'off'
-                                    ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                    : theme === 'light'
-                                      ? 'rgba(17, 24, 39, 0.28)'
-                                      : 'rgba(255, 255, 255, 0.22)',
-                                boxShadow:
-                                  flashGuardMode !== 'off'
-                                    ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
-                                    : 'none',
+                                    ? 'var(--pulse-switch-on-border)'
+                                    : 'var(--pulse-switch-off-border)',
                               }}
                             >
                               <span
-                                className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                                className={`w-3.5 h-3.5 rounded-full shadow transition-transform duration-200 ${
                                   flashGuardMode !== 'off' ? 'translate-x-4' : 'translate-x-0'
                                 }`}
+                                style={{
+                                  backgroundColor:
+                                    flashGuardMode !== 'off'
+                                      ? 'var(--pulse-switch-thumb, #ffffff)'
+                                      : '#ffffff',
+                                }}
                               />
                             </span>
                           </Menu.CheckboxItem>
 
                           {flashGuardMode !== 'off' && (
                             <div
-                              className={`px-2 py-1.5 rounded-xl border space-y-2 ${
-                                theme === 'light'
-                                  ? 'bg-black/[0.05] border-black/10'
-                                  : 'bg-white/[0.04] border-white/10'
-                              }`}
+                              className="px-2 py-1.5 rounded-xl border space-y-2"
+                              style={{
+                                backgroundColor: isLightUi
+                                  ? 'rgba(9, 9, 11, 0.05)'
+                                  : 'rgba(255, 255, 255, 0.04)',
+                                borderColor: 'var(--pulse-menu-sep)',
+                              }}
                             >
                               <div className="grid grid-cols-2 gap-1">
                                 <button
@@ -1878,24 +2957,18 @@ export function CadenceVideoSkin({
                                     e.stopPropagation();
                                     onChangeFlashGuardMode?.('comfort');
                                   }}
-                                  className={`px-2 py-1 rounded-lg text-[10.5px] font-medium transition-colors cursor-pointer ${
-                                    flashGuardMode === 'comfort'
-                                      ? theme === 'light'
-                                        ? 'text-zinc-950 font-semibold'
-                                        : 'text-white font-semibold'
-                                      : theme === 'light'
-                                        ? 'text-zinc-600 hover:text-zinc-950'
-                                        : 'text-zinc-400 hover:text-white'
-                                  }`}
+                                  className="px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-colors cursor-pointer"
                                   style={
                                     flashGuardMode === 'comfort'
                                       ? {
-                                          backgroundColor:
-                                            'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.28)',
-                                          border:
-                                            '1px solid rgba(var(--pulse-video-rgb, 255, 107, 0), 0.75)',
+                                          backgroundColor: 'var(--pulse-menu-pill-bg)',
+                                          color: 'var(--pulse-menu-pill-fg)',
+                                          border: '1px solid var(--pulse-menu-pill-bg)',
                                         }
-                                      : { border: '1px solid transparent' }
+                                      : {
+                                          border: '1px solid transparent',
+                                          opacity: 0.78,
+                                        }
                                   }
                                 >
                                   Balanced
@@ -1906,37 +2979,27 @@ export function CadenceVideoSkin({
                                     e.stopPropagation();
                                     onChangeFlashGuardMode?.('strict');
                                   }}
-                                  className={`px-2 py-1 rounded-lg text-[10.5px] font-medium transition-colors cursor-pointer ${
-                                    flashGuardMode === 'strict'
-                                      ? theme === 'light'
-                                        ? 'text-zinc-950 font-semibold'
-                                        : 'text-white font-semibold'
-                                      : theme === 'light'
-                                        ? 'text-zinc-600 hover:text-zinc-950'
-                                        : 'text-zinc-400 hover:text-white'
-                                  }`}
+                                  className="px-2 py-1 rounded-lg text-[10.5px] font-semibold transition-colors cursor-pointer"
                                   style={
                                     flashGuardMode === 'strict'
                                       ? {
-                                          backgroundColor:
-                                            'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.28)',
-                                          border:
-                                            '1px solid rgba(var(--pulse-video-rgb, 255, 107, 0), 0.75)',
+                                          backgroundColor: 'var(--pulse-menu-pill-bg)',
+                                          color: 'var(--pulse-menu-pill-fg)',
+                                          border: '1px solid var(--pulse-menu-pill-bg)',
                                         }
-                                      : { border: '1px solid transparent' }
+                                      : {
+                                          border: '1px solid transparent',
+                                          opacity: 0.78,
+                                        }
                                   }
                                 >
                                   Strict (3Hz)
                                 </button>
                               </div>
-                              <div
-                                className={`flex items-center justify-between gap-2 text-[10px] font-mono-tabular ${
-                                  theme === 'light' ? 'text-zinc-600' : 'text-zinc-400'
-                                }`}
-                              >
+                              <div className="flex items-center justify-between gap-2 text-[10px] font-mono-tabular opacity-85">
                                 <span className="inline-flex items-center gap-1">
                                   <ShieldCheck
-                                    className={`w-3 h-3 ${theme === 'light' ? 'text-emerald-600' : 'text-emerald-400'}`}
+                                    className={`w-3 h-3 ${isLightUi ? 'text-emerald-700' : 'text-emerald-400'}`}
                                     aria-hidden="true"
                                   />
                                   <span>
@@ -1947,7 +3010,7 @@ export function CadenceVideoSkin({
                                 </span>
                                 <span
                                   className={`font-semibold ${
-                                    theme === 'light' ? 'text-emerald-700' : 'text-emerald-300'
+                                    isLightUi ? 'text-emerald-700' : 'text-emerald-300'
                                   }`}
                                 >
                                   {flashGuard && !flashGuard.guardAvailable
@@ -1967,7 +3030,7 @@ export function CadenceVideoSkin({
                             onCheckedChange={() => onToggleSignalBattery?.()}
                           >
                             <span className="inline-flex items-center gap-2">
-                              <Wifi className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <Wifi className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Signal &amp; Battery</span>
                             </span>
                             <span
@@ -1975,24 +3038,22 @@ export function CadenceVideoSkin({
                               className="inline-flex items-center w-9 h-5 rounded-full p-0.5 transition-all duration-200 border shrink-0"
                               style={{
                                 backgroundColor: showSignalBattery
-                                  ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                  : theme === 'light'
-                                    ? 'rgba(17, 24, 39, 0.16)'
-                                    : 'rgba(255, 255, 255, 0.12)',
+                                  ? 'var(--pulse-switch-on-bg)'
+                                  : 'var(--pulse-switch-off-bg)',
                                 borderColor: showSignalBattery
-                                  ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                  : theme === 'light'
-                                    ? 'rgba(17, 24, 39, 0.28)'
-                                    : 'rgba(255, 255, 255, 0.22)',
-                                boxShadow: showSignalBattery
-                                  ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
-                                  : 'none',
+                                  ? 'var(--pulse-switch-on-border)'
+                                  : 'var(--pulse-switch-off-border)',
                               }}
                             >
                               <span
-                                className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                                className={`w-3.5 h-3.5 rounded-full shadow transition-transform duration-200 ${
                                   showSignalBattery ? 'translate-x-4' : 'translate-x-0'
                                 }`}
+                                style={{
+                                  backgroundColor: showSignalBattery
+                                    ? 'var(--pulse-switch-thumb, #ffffff)'
+                                    : '#ffffff',
+                                }}
                               />
                             </span>
                           </Menu.CheckboxItem>
@@ -2004,7 +3065,7 @@ export function CadenceVideoSkin({
                             onCheckedChange={() => onToggleTime?.()}
                           >
                             <span className="inline-flex items-center gap-2">
-                              <Clock className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <Clock className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Time</span>
                             </span>
                             <span
@@ -2012,24 +3073,22 @@ export function CadenceVideoSkin({
                               className="inline-flex items-center w-9 h-5 rounded-full p-0.5 transition-all duration-200 border shrink-0"
                               style={{
                                 backgroundColor: showTime
-                                  ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.38)'
-                                  : theme === 'light'
-                                    ? 'rgba(17, 24, 39, 0.16)'
-                                    : 'rgba(255, 255, 255, 0.12)',
+                                  ? 'var(--pulse-switch-on-bg)'
+                                  : 'var(--pulse-switch-off-bg)',
                                 borderColor: showTime
-                                  ? 'rgba(var(--pulse-video-rgb, 255, 107, 0), 0.85)'
-                                  : theme === 'light'
-                                    ? 'rgba(17, 24, 39, 0.28)'
-                                    : 'rgba(255, 255, 255, 0.22)',
-                                boxShadow: showTime
-                                  ? '0 0 10px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35)'
-                                  : 'none',
+                                  ? 'var(--pulse-switch-on-border)'
+                                  : 'var(--pulse-switch-off-border)',
                               }}
                             >
                               <span
-                                className={`w-3.5 h-3.5 rounded-full bg-white shadow transition-transform duration-200 ${
+                                className={`w-3.5 h-3.5 rounded-full shadow transition-transform duration-200 ${
                                   showTime ? 'translate-x-4' : 'translate-x-0'
                                 }`}
+                                style={{
+                                  backgroundColor: showTime
+                                    ? 'var(--pulse-switch-thumb, #ffffff)'
+                                    : '#ffffff',
+                                }}
                               />
                             </span>
                           </Menu.CheckboxItem>
@@ -2042,7 +3101,7 @@ export function CadenceVideoSkin({
                             onClick={handleBookmarkClick}
                           >
                             <span className="inline-flex items-center gap-2">
-                              <BookmarkPlus className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <BookmarkPlus className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Bookmark Frame</span>
                             </span>
                             <span className="cadence-menu-hint font-mono-tabular">
@@ -2055,7 +3114,7 @@ export function CadenceVideoSkin({
                             onClick={onDownload}
                           >
                             <span className="inline-flex items-center gap-2">
-                              <Download className="w-4 h-4 text-zinc-400" aria-hidden="true" />
+                              <Download className="w-4 h-4 cadence-menu-icon" aria-hidden="true" />
                               <span>Download Clip</span>
                             </span>
                           </Menu.Item>

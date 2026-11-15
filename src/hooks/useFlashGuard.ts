@@ -85,8 +85,8 @@ export function useFlashGuard(
 
       if (videoEl.readyState < 2) return;
 
-      const dt = lastSampleTime > 0 ? now - lastSampleTime : 33;
-      if (dt < 32) return;
+      const dt = lastSampleTime > 0 ? now - lastSampleTime : 66;
+      if (dt < 66) return;
       lastSampleTime = now;
 
       let luma = 0;
@@ -120,7 +120,7 @@ export function useFlashGuard(
       }
 
       if (!guardAvailable) {
-        if (now - lastUiSyncTime > 200) {
+        if (now - lastUiSyncTime > 300) {
           lastUiSyncTime = now;
           setState((prev) =>
             prev.guardAvailable ? { ...NEUTRAL_STATE, guardAvailable: false } : prev
@@ -196,21 +196,24 @@ export function useFlashGuard(
         if (currentSuppression < 0.015) currentSuppression = 0;
       }
 
-      if (now - lastUiSyncTime >= 48) {
+      const brightnessFactor = 1 - (1 - minBrightness) * currentSuppression;
+      const contrastFactor = 1 - (1 - minContrast) * currentSuppression;
+      const veilOpacity = maxVeil * currentSuppression;
+
+      const skinNode = videoEl.closest('.cadence-skin') as HTMLElement | null;
+      if (skinNode) {
+        skinNode.style.setProperty('--pulse-guard-brightness', brightnessFactor.toFixed(3));
+        skinNode.style.setProperty('--pulse-guard-contrast', contrastFactor.toFixed(3));
+        skinNode.style.setProperty('--pulse-guard-veil', veilOpacity.toFixed(3));
+      }
+
+      if (now - lastUiSyncTime >= 250) {
         lastUiSyncTime = now;
-        const brightnessFactor =
-          1 - (1 - minBrightness) * currentSuppression;
-        const contrastFactor =
-          1 - (1 - minContrast) * currentSuppression;
-        const veilOpacity = maxVeil * currentSuppression;
         const attenuationPct = Math.round((1 - brightnessFactor) * 100);
         const activeAlert = attenuationPct >= 5;
 
         setState((prev) => {
           if (
-            Math.abs(prev.brightnessFactor - brightnessFactor) < 0.01 &&
-            Math.abs(prev.contrastFactor - contrastFactor) < 0.01 &&
-            Math.abs(prev.veilOpacity - veilOpacity) < 0.01 &&
             prev.attenuationPct === attenuationPct &&
             prev.dampenedCount === dampenedCount &&
             prev.activeAlert === activeAlert &&
@@ -236,6 +239,12 @@ export function useFlashGuard(
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      const skinNode = videoEl.closest('.cadence-skin') as HTMLElement | null;
+      if (skinNode) {
+        skinNode.style.setProperty('--pulse-guard-brightness', '1');
+        skinNode.style.setProperty('--pulse-guard-contrast', '1');
+        skinNode.style.setProperty('--pulse-guard-veil', '0');
+      }
     };
   }, [videoEl, mode, corsEnabled]);
 

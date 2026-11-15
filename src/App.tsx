@@ -35,6 +35,8 @@ import { useNightWhisperAudio } from './hooks/useNightWhisperAudio';
 import { useFlashGuard } from './hooks/useFlashGuard';
 import {
   DEFAULT_KEYMAP,
+  DEFAULT_SUBTITLE_STYLE,
+  THEME_ACCENTS,
   type FlashGuardMode,
   type FrameBookmark,
   type KeymapConfig,
@@ -47,6 +49,7 @@ import {
   VIDEO_REELS,
   formatTimecode,
   generateFallbackVideoBlob,
+  type ReelSubtitleTrack,
 } from './utils/synthVideo';
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -109,7 +112,6 @@ export default function App() {
   const [muxPlaybackId, setMuxPlaybackId] = useState<string>('');
   const [viewport, setViewport] = useState<ViewportPreset>('desktop');
   const [forceControls, setForceControls] = useState<boolean>(false);
-  const [showInPlayerBadge, setShowInPlayerBadge] = useState<boolean>(true);
   const [showSignalBattery, setShowSignalBattery] = useState<boolean>(false);
   const [showTime, setShowTime] = useState<boolean>(false);
   const [backdropMode, setBackdropMode] = useState<PlayerBackdropMode>('video');
@@ -142,13 +144,11 @@ export default function App() {
     }
     return stored;
   });
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleState>(() =>
-    readStorage<SubtitleStyleState>('pulse:subtitleStyle', {
-      fontSize: 'md',
-      color: '#F8FAFC',
-      bgOpacity: 0.88,
-    })
-  );
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleState>(() => ({
+    ...DEFAULT_SUBTITLE_STYLE,
+    ...readStorage<Partial<SubtitleStyleState>>('pulse:subtitleStyle', DEFAULT_SUBTITLE_STYLE),
+  }));
+  const [customSubtitleTrack, setCustomSubtitleTrack] = useState<ReelSubtitleTrack | null>(null);
   const [keymap, setKeymap] = useState<KeymapConfig>(() =>
     readStorage<KeymapConfig>('pulse:keymap', DEFAULT_KEYMAP)
   );
@@ -184,8 +184,12 @@ export default function App() {
   const generatingRef = useRef<Record<string, boolean>>({});
   const lastHistorySaveRef = useRef<number>(0);
   const lastTimeSyncRef = useRef<number>(0);
+  const lastSecondRef = useRef<number>(-1);
   const playerSectionRef = useRef<HTMLDivElement>(null);
   const mediaAdapterCleanupRef = useRef<(() => void) | null>(null);
+  const autoPlayPendingRef = useRef<boolean>(false);
+  const [autoPlayOnSwitch, setAutoPlayOnSwitch] = useState<boolean>(false);
+  const userToggledSubtitlesRef = useRef<boolean>(false);
 
   const handleVideoRef = useCallback((node: unknown) => {
     const resolved = resolveVideoElement(node);
@@ -277,20 +281,29 @@ export default function App() {
 
     const onTimeUpdate = () => {
       const ct = videoEl.currentTime || 0;
+      const wholeSec = Math.floor(ct);
       const now = Date.now();
-      if (now - lastTimeSyncRef.current >= 500 || videoEl.paused || videoEl.ended) {
+      if (
+        wholeSec !== lastSecondRef.current ||
+        now - lastTimeSyncRef.current >= 1000 ||
+        videoEl.paused ||
+        videoEl.ended
+      ) {
+        lastSecondRef.current = wholeSec;
         lastTimeSyncRef.current = now;
         setCurrentTime(ct);
       }
-      if (ct > 2 && now - lastHistorySaveRef.current > 2500) {
+      if (ct > 2 && now - lastHistorySaveRef.current > 3000) {
         lastHistorySaveRef.current = now;
-        setWatchHistory((prev) => ({ ...prev, [activeMediaKey]: Math.floor(ct) }));
+        setWatchHistory((prev) => ({ ...prev, [activeMediaKey]: wholeSec }));
       }
     };
 
     const onSeeked = () => {
+      const ct = videoEl.currentTime || 0;
+      lastSecondRef.current = Math.floor(ct);
       lastTimeSyncRef.current = Date.now();
-      setCurrentTime(videoEl.currentTime || 0);
+      setCurrentTime(ct);
     };
 
     const onEnterPip = () => {
@@ -301,7 +314,60 @@ export default function App() {
       setNativePipActive(false);
     };
 
+    let cancelled = false;
+    userToggledSubtitlesRef.current = false;
+    const disableDefaultSubtitles = () => {
+      if (isCustomMux || userToggledSubtitlesRef.current || !videoEl.textTracks) return;
+      for (let i = 0; i < videoEl.textTracks.length; i += 1) {
+        const track = videoEl.textTracks[i];
+        if (track.kind === 'subtitles' || track.kind === 'captions') {
+          track.mode = 'disabled';
+        }
+      }
+    };
+
+    const tryAutoPlay = () => {
+      if (cancelled || !autoPlayPendingRef.current) return;
+      if (!videoEl.paused) {
+        autoPlayPendingRef.current = false;
+        return;
+      }
+      const playPromise = videoEl.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            if (!cancelled && !videoEl.paused) {
+              autoPlayPendingRef.current = false;
+            }
+          })
+          .catch((err: unknown) => {
+            if (cancelled) return;
+            const errName = (err as { name?: string } | null)?.name;
+            if (errName === 'NotAllowedError') {
+              videoEl.muted = true;
+              void videoEl.play().catch(() => {});
+            }
+            // Keep autoPlayPendingRef true for AbortError so canplay/canplaythrough retries
+          });
+      }
+    };
+
+    const onPlaying = () => {
+      autoPlayPendingRef.current = false;
+      syncFromVideo();
+    };
+
     syncFromVideo();
+    disableDefaultSubtitles();
+    if (autoPlayPendingRef.current) {
+      if (videoEl.readyState >= 2) {
+        tryAutoPlay();
+      }
+      videoEl.addEventListener('loadeddata', tryAutoPlay);
+      videoEl.addEventListener('canplay', tryAutoPlay);
+      videoEl.addEventListener('canplaythrough', tryAutoPlay);
+    }
+
     const events = [
       'loadedmetadata',
       'durationchange',
@@ -313,20 +379,43 @@ export default function App() {
       'volumechange',
     ] as const;
 
+    const onEnded = () => {
+      if (cancelled || isCustomMux || VIDEO_REELS.length <= 1) return;
+      const nextIdx = (activeReelIndex + 1) % VIDEO_REELS.length;
+      autoPlayPendingRef.current = true;
+      setAutoPlayOnSwitch(true);
+      setBackdropMode('video');
+      setActiveReelId(VIDEO_REELS[nextIdx].id);
+      setCurrentTime(0);
+      setDuration(0);
+      setBufferedPct(0);
+      setIsPlaying(false);
+    };
+
     events.forEach((evt) => videoEl.addEventListener(evt, syncFromVideo));
+    videoEl.addEventListener('playing', onPlaying);
+    videoEl.addEventListener('ended', onEnded);
+    videoEl.addEventListener('loadedmetadata', disableDefaultSubtitles);
     videoEl.addEventListener('timeupdate', onTimeUpdate);
     videoEl.addEventListener('seeked', onSeeked);
     videoEl.addEventListener('enterpictureinpicture', onEnterPip);
     videoEl.addEventListener('leavepictureinpicture', onLeavePip);
 
     return () => {
+      cancelled = true;
       events.forEach((evt) => videoEl.removeEventListener(evt, syncFromVideo));
+      videoEl.removeEventListener('playing', onPlaying);
+      videoEl.removeEventListener('ended', onEnded);
+      videoEl.removeEventListener('loadedmetadata', disableDefaultSubtitles);
+      videoEl.removeEventListener('loadeddata', tryAutoPlay);
+      videoEl.removeEventListener('canplay', tryAutoPlay);
+      videoEl.removeEventListener('canplaythrough', tryAutoPlay);
       videoEl.removeEventListener('timeupdate', onTimeUpdate);
       videoEl.removeEventListener('seeked', onSeeked);
       videoEl.removeEventListener('enterpictureinpicture', onEnterPip);
       videoEl.removeEventListener('leavepictureinpicture', onLeavePip);
     };
-  }, [videoEl, activeMediaKey]);
+  }, [videoEl, activeMediaKey, activeReelIndex, isCustomMux]);
 
   const isPip = nativePipActive || floatingPipActive;
 
@@ -376,10 +465,15 @@ export default function App() {
     setFloatingPipActive((prev) => !prev);
   }, [videoEl, floatingPipActive]);
 
+  const themeStartAccent =
+    theme === 'custom' ? customAccent : THEME_ACCENTS[theme];
+
   const ambientRgb = useLiveColorSampling(
     videoEl,
     activePoster,
-    backdropMode === 'video' && !accessibility.highContrast
+    backdropMode === 'video' && !accessibility.highContrast,
+    themeStartAccent,
+    `${activeMediaKey}:${theme}:${customAccent}`
   );
 
   const { compressionDb: nightCompressionDb } = useNightWhisperAudio(
@@ -431,6 +525,8 @@ export default function App() {
   }, []);
 
   const handleSelectReel = (id: string) => {
+    autoPlayPendingRef.current = true;
+    setAutoPlayOnSwitch(true);
     setMuxPlaybackId('');
     setBackdropMode('video');
     setActiveReelId(id);
@@ -451,6 +547,8 @@ export default function App() {
   };
 
   const handleLoadMuxPlaybackId = (playbackId: string) => {
+    autoPlayPendingRef.current = true;
+    setAutoPlayOnSwitch(true);
     setBackdropMode('video');
     setMuxPlaybackId(playbackId);
     setCurrentTime(0);
@@ -558,6 +656,21 @@ export default function App() {
     setFocusedControl(null);
   };
 
+  const handleToggleCinemaMode = useCallback(() => {
+    setCinemaMode((prev) => {
+      const next = !prev;
+      if (next) {
+        window.requestAnimationFrame(() => {
+          playerSectionRef.current?.scrollIntoView({
+            behavior: accessibility.reducedMotion ? 'auto' : 'smooth',
+            block: 'center',
+          });
+        });
+      }
+      return next;
+    });
+  }, [accessibility.reducedMotion]);
+
   const viewportWidthClass = compareMode
     ? 'max-w-full'
     : viewport === 'mobile320'
@@ -568,10 +681,22 @@ export default function App() {
           ? 'max-w-[640px]'
           : 'max-w-full';
 
+  const headerAccent =
+    theme === 'custom'
+      ? customAccent
+      : theme === 'light'
+        ? '#FF6B00'
+        : THEME_ACCENTS[theme];
+
   return (
     <div
-      className="min-h-screen bg-[#0B0B0D] text-[#F4F4F0] flex flex-col"
-      style={{ '--pulse-video-rgb': ambientRgb } as CSSProperties}
+      className="min-h-screen bg-[#0B0B0D] text-[#F4F4F0] flex flex-col overflow-x-clip"
+      style={
+        {
+          '--pulse-video-rgb': ambientRgb,
+          '--pulse-header-accent': headerAccent,
+        } as CSSProperties
+      }
     >
       {/* Cinema Mode Backdrop Scrim */}
       {cinemaMode && (
@@ -587,7 +712,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
           <a
             href="#player"
-            className="font-display text-lg font-bold tracking-tight text-[#F4F4F0] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[#FF6B00] focus-visible:outline-offset-4 rounded"
+            className="font-display text-lg font-bold tracking-tight text-[#F4F4F0] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] focus-visible:outline-offset-4 rounded"
           >
             Pulse
           </a>
@@ -598,30 +723,30 @@ export default function App() {
           >
             <a
               href="#player"
-              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[#FF6B00] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[#FF6B00] rounded"
+              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[var(--pulse-header-accent)] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] rounded"
             >
-              <Play className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#FF6B00] transition-colors" strokeWidth={1.8} aria-hidden="true" />
+              <Play className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[var(--pulse-header-accent)] transition-colors" strokeWidth={1.8} aria-hidden="true" />
               <span>Player</span>
             </a>
             <a
               href="#accessibility"
-              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[#FF6B00] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[#FF6B00] rounded"
+              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[var(--pulse-header-accent)] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] rounded"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#FF6B00] transition-colors" strokeWidth={1.8} aria-hidden="true" />
+              <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[var(--pulse-header-accent)] transition-colors" strokeWidth={1.8} aria-hidden="true" />
               <span>Workbench</span>
             </a>
             <a
               href="#tag-badge"
-              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[#FF6B00] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[#FF6B00] rounded"
+              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[var(--pulse-header-accent)] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] rounded"
             >
-              <Hash className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#FF6B00] transition-colors" strokeWidth={1.8} aria-hidden="true" />
+              <Hash className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[var(--pulse-header-accent)] transition-colors" strokeWidth={1.8} aria-hidden="true" />
               <span>Tag Badge</span>
             </a>
             <a
               href="#design-notes"
-              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[#FF6B00] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[#FF6B00] rounded"
+              className="group relative inline-flex items-center gap-2 py-1.5 bg-transparent hover:text-white transition-colors whitespace-nowrap shrink-0 after:absolute after:inset-x-0 after:-bottom-[1px] after:h-[1.5px] after:scale-x-0 hover:after:scale-x-100 after:bg-[var(--pulse-header-accent)] after:transition-transform after:origin-left focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] rounded"
             >
-              <BookOpen className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#FF6B00] transition-colors" strokeWidth={1.8} aria-hidden="true" />
+              <BookOpen className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[var(--pulse-header-accent)] transition-colors" strokeWidth={1.8} aria-hidden="true" />
               <span>Design Notes</span>
             </a>
           </nav>
@@ -629,18 +754,18 @@ export default function App() {
           <div className="flex items-center shrink-0">
             <button
               type="button"
-              onClick={() => setCinemaMode((v) => !v)}
-              className={`cadence-pill-border inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium bg-transparent transition-all whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#FF6B00] focus-visible:outline-offset-2 ${
+              onClick={handleToggleCinemaMode}
+              className={`cadence-pill-border inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium bg-transparent transition-all whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--pulse-header-accent)] focus-visible:outline-offset-2 ${
                 cinemaMode
-                  ? 'text-[#FF6B00] shadow-[0_0_20px_rgba(255,107,0,0.3)]'
+                  ? 'text-[var(--pulse-header-accent)] shadow-[0_0_20px_rgba(255,107,0,0.3)]'
                   : 'text-[#F4F4F0] hover:text-white'
               }`}
               data-active={cinemaMode ? '' : undefined}
             >
               {cinemaMode ? (
-                <Minimize2 className="w-3.5 h-3.5 text-[#FF6B00]" strokeWidth={1.9} aria-hidden="true" />
+                <Minimize2 className="w-3.5 h-3.5 text-[var(--pulse-header-accent)]" strokeWidth={1.9} aria-hidden="true" />
               ) : (
-                <Maximize2 className="w-3.5 h-3.5 text-[#FF6B00]" strokeWidth={1.9} aria-hidden="true" />
+                <Maximize2 className="w-3.5 h-3.5 text-[var(--pulse-header-accent)]" strokeWidth={1.9} aria-hidden="true" />
               )}
               <span>{cinemaMode ? 'Exit Cinema' : 'Cinema Mode'}</span>
             </button>
@@ -707,17 +832,17 @@ export default function App() {
               )}
 
               {/* Live Color Sampling Ambient Glow + Player Frame */}
-              <div className={`w-full ${viewportWidthClass} relative transition-all duration-200`}>
+              <div className={`w-full ${viewportWidthClass} max-w-full min-w-0 relative transition-all duration-200`}>
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute -inset-4 rounded-3xl blur-2xl opacity-55 transition-colors duration-500"
+                  className="pointer-events-none absolute -inset-3 sm:-inset-5 rounded-3xl opacity-55 transition-colors duration-500"
                   style={{
-                    background: `radial-gradient(60% 60% at 50% 50%, rgba(${ambientRgb}, 0.34), transparent 75%)`,
+                    background: `radial-gradient(64% 64% at 50% 50%, rgba(${ambientRgb}, 0.28), transparent 72%)`,
                   }}
                 />
 
                 <div
-                  className={`relative grid gap-6 ${
+                  className={`relative grid gap-6 min-w-0 ${
                     compareMode ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'
                   }`}
                 >
@@ -751,8 +876,8 @@ export default function App() {
                   <div
                     className={
                       floatingPipActive
-                        ? 'fixed bottom-4 right-4 z-50 w-[300px] sm:w-[370px] rounded-2xl border border-white/25 bg-black shadow-[0_24px_64px_rgba(0,0,0,0.88)] overflow-hidden transition-all duration-300'
-                        : 'w-full rounded-2xl border border-white/15 bg-black shadow-[0_28px_80px_rgba(0,0,0,0.7)] overflow-hidden'
+                        ? 'fixed bottom-3 right-3 sm:bottom-4 sm:right-4 z-50 w-[min(300px,calc(100vw-24px))] sm:w-[370px] rounded-2xl border border-white/25 bg-black shadow-[0_24px_64px_rgba(0,0,0,0.88)] overflow-hidden transition-all duration-300'
+                        : 'w-full min-w-0 rounded-2xl border border-white/15 bg-black shadow-[0_28px_80px_rgba(0,0,0,0.7)] overflow-hidden'
                     }
                   >
                     {floatingPipActive && (
@@ -776,13 +901,13 @@ export default function App() {
                     )}
                     {compareMode && !floatingPipActive && (
                       <div className="px-3.5 py-2 border-b border-white/10 bg-[#121215] flex items-center justify-between text-xs font-mono-tabular">
-                        <span className="text-[#FF6B00] font-semibold">
+                        <span className="font-semibold" style={{ color: headerAccent }}>
                           A · Pulse Player UI
                         </span>
                         <span className="text-zinc-400">Custom Skin</span>
                       </div>
                     )}
-                    <div className="aspect-video w-full relative">
+                    <div className="aspect-video w-full max-w-full max-h-[75dvh] mx-auto relative overflow-hidden">
                       <VideoPlayer
                         key={`${activeReel.id}-${muxPlaybackId}-${isUsingFallback ? 'fb' : 'cdn'}`}
                       >
@@ -800,6 +925,17 @@ export default function App() {
                           onChangeTheme={setTheme}
                           accessibility={accessibility}
                           subtitleStyle={subtitleStyle}
+                          onUpdateSubtitleStyle={(patch) =>
+                            setSubtitleStyle((prev) => ({ ...prev, ...patch }))
+                          }
+                          customSubtitleTrack={customSubtitleTrack}
+                          onUploadSubtitleTrack={(track) => {
+                            userToggledSubtitlesRef.current = true;
+                            setCustomSubtitleTrack(track);
+                          }}
+                          onSubtitleUserInteraction={() => {
+                            userToggledSubtitlesRef.current = true;
+                          }}
                           bookmarks={activeBookmarks}
                           resumeTime={activeResumeTime}
                           currentTime={currentTime}
@@ -818,7 +954,6 @@ export default function App() {
                           onDownload={handleDownloadClip}
                           keymap={keymap}
                           forceControlsVisible={forceControls}
-                          showInPlayerBadge={showInPlayerBadge}
                           showSignalBattery={showSignalBattery}
                           onToggleSignalBattery={() => setShowSignalBattery((v) => !v)}
                           showTime={showTime}
@@ -839,6 +974,7 @@ export default function App() {
                               ref={handleVideoRef}
                               mediaRef={handleMediaAdapterRef}
                               src={activeSrc}
+                              autoPlay={autoPlayOnSwitch}
                               playsInline
                               crossOrigin="anonymous"
                               preload="auto"
@@ -851,17 +987,31 @@ export default function App() {
                                 label="Chapters"
                                 default
                               />
-                              <track
-                                kind="captions"
-                                src={activeReel.captionsUrl}
-                                srcLang="en"
-                                label="English"
-                              />
+                              {!isCustomMux &&
+                                activeReel.subtitleTracks.map((t) => (
+                                  <track
+                                    key={t.id}
+                                    kind={t.kind}
+                                    src={t.src}
+                                    srcLang={t.lang}
+                                    label={t.label}
+                                  />
+                                ))}
+                              {customSubtitleTrack && (
+                                <track
+                                  key={customSubtitleTrack.id}
+                                  kind={customSubtitleTrack.kind}
+                                  src={customSubtitleTrack.src}
+                                  srcLang={customSubtitleTrack.lang}
+                                  label={customSubtitleTrack.label}
+                                />
+                              )}
                             </HlsJsVideo>
                           ) : (
                             <Video
                               ref={handleVideoRef}
                               src={activeSrc}
+                              autoPlay={autoPlayOnSwitch}
                               playsInline
                               crossOrigin={streamSupportsCors ? 'anonymous' : undefined}
                               preload="auto"
@@ -874,12 +1024,25 @@ export default function App() {
                                 label="Chapters"
                                 default
                               />
-                              <track
-                                kind="captions"
-                                src={activeReel.captionsUrl}
-                                srcLang="en"
-                                label="English"
-                              />
+                              {!isCustomMux &&
+                                activeReel.subtitleTracks.map((t) => (
+                                  <track
+                                    key={t.id}
+                                    kind={t.kind}
+                                    src={t.src}
+                                    srcLang={t.lang}
+                                    label={t.label}
+                                  />
+                                ))}
+                              {customSubtitleTrack && (
+                                <track
+                                  key={customSubtitleTrack.id}
+                                  kind={customSubtitleTrack.kind}
+                                  src={customSubtitleTrack.src}
+                                  srcLang={customSubtitleTrack.lang}
+                                  label={customSubtitleTrack.label}
+                                />
+                              )}
                             </Video>
                           )}
                         </CadenceVideoSkin>
@@ -889,14 +1052,14 @@ export default function App() {
 
                   {/* Secondary (A/B Compare Mode): Default Video.js v10 VideoSkin */}
                   {compareMode && (
-                    <div className="w-full rounded-2xl border border-white/15 bg-black shadow-[0_28px_80px_rgba(0,0,0,0.7)] overflow-hidden">
+                    <div className="w-full min-w-0 max-w-full rounded-2xl border border-white/15 bg-black shadow-[0_28px_80px_rgba(0,0,0,0.7)] overflow-hidden">
                       <div className="px-3.5 py-2 border-b border-white/10 bg-[#121215] flex items-center justify-between text-xs font-mono-tabular">
                         <span className="text-zinc-200 font-semibold">
                           B · Video.js v10 Default
                         </span>
                         <span className="text-zinc-400">@videojs/react/video</span>
                       </div>
-                      <div className="aspect-video w-full relative">
+                      <div className="aspect-video w-full max-w-full max-h-[75dvh] mx-auto relative overflow-hidden">
                         <VideoPlayer
                           key={`compare-${activeReel.id}-${muxPlaybackId}-${isUsingFallback ? 'fb' : 'cdn'}`}
                         >
@@ -907,7 +1070,8 @@ export default function App() {
                                 poster={activePoster}
                                 playsInline
                                 crossOrigin="anonymous"
-                                preload="metadata"
+                                preload="auto"
+                                onError={handleVideoError}
                               />
                             ) : (
                               <Video
@@ -915,7 +1079,8 @@ export default function App() {
                                 poster={activePoster}
                                 playsInline
                                 crossOrigin={streamSupportsCors ? 'anonymous' : undefined}
-                                preload="metadata"
+                                preload="auto"
+                                onError={handleVideoError}
                               />
                             )}
                           </VideoSkin>
@@ -989,13 +1154,11 @@ export default function App() {
           onJumpToTime={handleJumpToTime}
           onClearWatchHistory={handleClearWatchHistory}
           cinemaMode={cinemaMode}
-          onToggleCinemaMode={() => setCinemaMode((v) => !v)}
+          onToggleCinemaMode={handleToggleCinemaMode}
           compareMode={compareMode}
           onToggleCompareMode={() => setCompareMode((v) => !v)}
           forceControls={forceControls}
           onToggleForceControls={() => setForceControls((v) => !v)}
-          showInPlayerBadge={showInPlayerBadge}
-          onToggleInPlayerBadge={() => setShowInPlayerBadge((v) => !v)}
           muxPlaybackId={muxPlaybackId}
           onLoadMuxPlaybackId={handleLoadMuxPlaybackId}
           isUsingFallback={isUsingFallback}

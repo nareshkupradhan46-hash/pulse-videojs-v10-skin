@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { memo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   Activity,
   BookmarkPlus,
@@ -72,8 +72,6 @@ interface SkinTestbenchProps {
   onToggleCompareMode: () => void;
   forceControls: boolean;
   onToggleForceControls: () => void;
-  showInPlayerBadge: boolean;
-  onToggleInPlayerBadge: () => void;
   muxPlaybackId: string;
   onLoadMuxPlaybackId: (playbackId: string) => void;
   isUsingFallback: boolean;
@@ -95,7 +93,7 @@ const SHORTCUT_LABELS: { field: keyof KeymapConfig; label: string }[] = [
   { field: 'info', label: 'Picture-in-Picture' },
 ];
 
-export function SkinTestbench({
+export const SkinTestbench = memo(function SkinTestbench({
   reels,
   activeReelId,
   onSelectReel,
@@ -128,8 +126,6 @@ export function SkinTestbench({
   onToggleCompareMode,
   forceControls,
   onToggleForceControls,
-  showInPlayerBadge,
-  onToggleInPlayerBadge,
   muxPlaybackId,
   onLoadMuxPlaybackId,
   isUsingFallback,
@@ -328,19 +324,6 @@ export function SkinTestbench({
                   >
                     <Eye className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Pin HUD</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onToggleInPlayerBadge}
-                    aria-pressed={showInPlayerBadge}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#FF6B00] ${
-                      showInPlayerBadge
-                        ? 'bg-white/12 border-white/25 text-white'
-                        : 'bg-black/35 border-white/12 text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    <span>In-Player Tag Badge</span>
                   </button>
                 </div>
               </div>
@@ -621,6 +604,48 @@ export function SkinTestbench({
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="block text-[11px] text-zinc-400 mb-1.5">Position</span>
+                    <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-black/50 border border-white/10">
+                      {(['bottom', 'top'] as const).map((pos) => (
+                        <button
+                          key={pos}
+                          type="button"
+                          onClick={() => onUpdateSubtitleStyle({ position: pos })}
+                          className={`py-1 rounded text-[11px] capitalize cursor-pointer ${
+                            (subtitleStyle.position ?? 'bottom') === pos
+                              ? 'bg-[#FF6B00] text-zinc-950 font-semibold'
+                              : 'text-zinc-300 hover:text-white'
+                          }`}
+                        >
+                          {pos}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="block text-[11px] text-zinc-400 mb-1.5">Edge Style</span>
+                    <div className="grid grid-cols-4 gap-1 p-1 rounded-lg bg-black/50 border border-white/10">
+                      {(['box', 'outline', 'shadow', 'clean'] as const).map((edge) => (
+                        <button
+                          key={edge}
+                          type="button"
+                          onClick={() => onUpdateSubtitleStyle({ edgeStyle: edge })}
+                          className={`py-1 rounded text-[11px] capitalize cursor-pointer ${
+                            (subtitleStyle.edgeStyle ?? 'box') === edge
+                              ? 'bg-[#FF6B00] text-zinc-950 font-semibold'
+                              : 'text-zinc-300 hover:text-white'
+                          }`}
+                        >
+                          {edge}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Remappable Keyboard Shortcuts */}
@@ -683,10 +708,10 @@ export function SkinTestbench({
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <h3 className="text-sm font-semibold text-[#F4F4F0]">
-                    Playlist Queue &amp; Luminance Reels
+                    Playlist Queue &amp; Continuous Play ({reels.length} Reels)
                   </h3>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    Includes Mux MP4, bright/dark stress reels, and adaptive HLS
+                    4 distinct styles — auto-advances seamlessly one after another
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -713,7 +738,7 @@ export function SkinTestbench({
                 {reels.map((reel) => {
                   const active = activeReelId === reel.id && !muxPlaybackId;
                   const Icon =
-                    reel.id === 'bright'
+                    reel.id === 'bright' || reel.id === 'mux-skate'
                       ? Sun
                       : reel.id === 'dark'
                         ? Moon
@@ -866,4 +891,4 @@ export function SkinTestbench({
       </div>
     </section>
   );
-}
+});

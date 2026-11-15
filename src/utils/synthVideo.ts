@@ -1,6 +1,21 @@
 import brightPoster from '../assets/images/poster_bright_daylight_1794564950680.jpg';
 import darkPoster from '../assets/images/poster_dark_cinema_1794564951623.jpg';
 
+export interface ReelSubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface ReelSubtitleTrack {
+  id: string;
+  lang: string;
+  label: string;
+  kind: 'subtitles' | 'captions';
+  src: string;
+  cues: ReelSubtitleCue[];
+}
+
 export interface VideoReel {
   id: string;
   title: string;
@@ -13,13 +28,100 @@ export interface VideoReel {
   supportsCors?: boolean;
   poster: string;
   chaptersUrl: string;
-  captionsUrl: string;
+  subtitleTracks: ReelSubtitleTrack[];
   introWindow?: [number, number];
 }
 
 function createBlobUrl(content: string, type: string): string {
   const blob = new Blob([content], { type });
   return URL.createObjectURL(blob);
+}
+
+function formatVttTimestamp(sec: number): string {
+  const clamped = Math.max(0, sec);
+  const hrs = Math.floor(clamped / 3600);
+  const mins = Math.floor((clamped % 3600) / 60);
+  const secs = Math.floor(clamped % 60);
+  const ms = Math.round((clamped - Math.floor(clamped)) * 1000);
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+}
+
+export function cuesToVtt(cues: ReelSubtitleCue[]): string {
+  const blocks = cues.map(
+    (c) => `${formatVttTimestamp(c.start)} --> ${formatVttTimestamp(c.end)}\n${c.text}`
+  );
+  return `WEBVTT\n\n${blocks.join('\n\n')}\n`;
+}
+
+function parseTimestampSec(ts: string): number {
+  const clean = ts.trim().replace(',', '.');
+  const parts = clean.split(':').map(Number);
+  if (parts.some((n) => Number.isNaN(n))) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
+export function parseSubtitlesFile(rawText: string): {
+  vttBlobUrl: string;
+  cues: ReelSubtitleCue[];
+} {
+  const normalized = rawText
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+  const vttText = normalized.trimStart().startsWith('WEBVTT')
+    ? normalized
+    : `WEBVTT\n\n${normalized}`;
+
+  const cues: ReelSubtitleCue[] = [];
+  const blocks = vttText.split(/\n{2,}/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const timeIdx = lines.findIndex((l) => l.includes('-->'));
+    if (timeIdx === -1) continue;
+    const [rawStart, rawEnd] = lines[timeIdx].split('-->');
+    if (!rawStart || !rawEnd) continue;
+    const start = parseTimestampSec(rawStart);
+    const end = parseTimestampSec(rawEnd.trim().split(/\s+/)[0]);
+    const text = lines
+      .slice(timeIdx + 1)
+      .join('\n')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    if (text && end > start) {
+      cues.push({ start, end, text });
+    }
+  }
+  return {
+    vttBlobUrl: createBlobUrl(vttText, 'text/vtt'),
+    cues,
+  };
+}
+
+function makeTracks(
+  reelId: string,
+  enCues: ReelSubtitleCue[],
+  esCues: ReelSubtitleCue[]
+): ReelSubtitleTrack[] {
+  return [
+    {
+      id: `${reelId}-en`,
+      lang: 'en',
+      label: 'English (Scene CC)',
+      kind: 'captions',
+      src: createBlobUrl(cuesToVtt(enCues), 'text/vtt'),
+      cues: enCues,
+    },
+    {
+      id: `${reelId}-es`,
+      lang: 'es',
+      label: 'Español (CC)',
+      kind: 'subtitles',
+      src: createBlobUrl(cuesToVtt(esCues), 'text/vtt'),
+      cues: esCues,
+    },
+  ];
 }
 
 const CHAPTERS_VTT = `WEBVTT
@@ -34,77 +136,114 @@ const CHAPTERS_VTT = `WEBVTT
 03. Precision Laser Scrubber
 `;
 
-const CAPTIONS_VTT = `WEBVTT
-
-00:00.200 --> 00:04.200
-Pulse Player UI — @videojs/react v10 Skin Showcase
-
-00:04.300 --> 00:08.500
-Adaptive luminance sampling · Voice Night Mode · Flash Guard
-
-00:08.600 --> 00:13.500
-Press C to toggle captions or style cues in Theme & A11y
-
-00:13.600 --> 00:20.000
-Precision laser scrubber with frame bookmarks & chapter pins
-`;
-
-const SHARED_CAPTIONS_URL = createBlobUrl(CAPTIONS_VTT, 'text/vtt');
-
 export const VIDEO_REELS: VideoReel[] = [
   {
     id: 'oceans',
     title: 'Pacific Oceans — Coastal Aerial Reel',
     subtitle: 'Fast-Start MP4 · Deep Ocean Cyan & Sunlit Surf Luminance',
-    streamBadge: 'v10 · FAST MP4 · OCEAN BLUE',
-    luminanceNote: 'Vibrant Cyan',
+    streamBadge: 'v10 · NATURE MP4 · 01 / 04',
+    luminanceNote: 'Coastal Aerial',
     src: 'https://vjs.zencdn.net/v/oceans.mp4',
     supportsCors: true,
     poster: brightPoster,
     chaptersUrl: createBlobUrl(CHAPTERS_VTT, 'text/vtt'),
-    captionsUrl: SHARED_CAPTIONS_URL,
     introWindow: [2, 8],
-  },
-  {
-    id: 'mux-hls',
-    title: 'Kinetic Cinema — Mux Adaptive HLS',
-    subtitle: 'Fast-Buffer ABR HLS (270p–1080p) via @videojs/react/media/hlsjs-video',
-    streamBadge: 'v10 · HLS ABR · MUX LIVE',
-    luminanceNote: 'Adaptive HLS',
-    src: 'https://stream.mux.com/DS00Spx1CV902MCtPj5WknGlR102V5HFkDe.m3u8',
-    muxPlaybackId: 'DS00Spx1CV902MCtPj5WknGlR102V5HFkDe',
-    isHls: true,
-    supportsCors: true,
-    poster: 'https://image.mux.com/DS00Spx1CV902MCtPj5WknGlR102V5HFkDe/thumbnail.jpg?width=1280',
-    chaptersUrl: createBlobUrl(CHAPTERS_VTT, 'text/vtt'),
-    captionsUrl: SHARED_CAPTIONS_URL,
-    introWindow: [2, 8],
+    subtitleTracks: makeTracks(
+      'oceans',
+      [
+        { start: 0.4, end: 5.5, text: '[Gentle ocean swells rolling across deep Pacific water]' },
+        { start: 6.0, end: 12.5, text: '[Seagulls gliding above sunlit whitewater surf]' },
+        { start: 13.0, end: 21.0, text: '[Waves cresting along coastal rock formations]' },
+        { start: 21.5, end: 32.0, text: '[Wide aerial pan over turquoise shoreline tide]' },
+        { start: 32.5, end: 46.0, text: '[Ambient surf receding in golden afternoon light]' },
+      ],
+      [
+        { start: 0.4, end: 5.5, text: '[Olas suaves avanzando sobre el Pacífico azul profundo]' },
+        { start: 6.0, end: 12.5, text: '[Gaviotas planeando sobre la espuma iluminada por el sol]' },
+        { start: 13.0, end: 21.0, text: '[Rompientes chocando contra los acantilados costeros]' },
+        { start: 21.5, end: 32.0, text: '[Plano aéreo amplio sobre la marea turquesa]' },
+        { start: 32.5, end: 46.0, text: '[Sonido ambiente del oleaje bajo la luz dorada]' },
+      ]
+    ),
   },
   {
     id: 'bright',
-    title: 'Botanical Bloom — Instant High-Chroma Reel',
+    title: 'Botanical Bloom — Macro Flora Reel',
     subtitle: '1.1 MB Instant-Play MP4 · Golden Petal & Emerald Palette',
-    streamBadge: 'v10 · INSTANT · 1.1 MB MP4',
+    streamBadge: 'v10 · MACRO MP4 · 02 / 04',
     luminanceNote: 'High Chroma',
     src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     supportsCors: true,
     poster: brightPoster,
     chaptersUrl: createBlobUrl(CHAPTERS_VTT, 'text/vtt'),
-    captionsUrl: SHARED_CAPTIONS_URL,
+    subtitleTracks: makeTracks(
+      'bright',
+      [
+        { start: 0.2, end: 2.8, text: '[Macro lens reveals vibrant golden petals unfolding]' },
+        { start: 2.9, end: 5.5, text: '[Soft daylight breeze sways emerald foliage]' },
+      ],
+      [
+        { start: 0.2, end: 2.8, text: '[Lente macro revela pétalos dorados abriéndose]' },
+        { start: 2.9, end: 5.5, text: '[Brisa suave mueve el follaje verde esmeralda]' },
+      ]
+    ),
   },
   {
     id: 'dark',
-    title: 'Big Buck Bunny — Multi-Bitrate HLS',
-    subtitle: 'Fast-Buffer HLS (240p–1080p) · Dynamic Forest & Twilight Tones',
-    streamBadge: 'v10 · HLS ABR · 240p–1080p',
-    luminanceNote: 'Dynamic Color',
+    title: 'Big Buck Bunny — 3D Forest Animation',
+    subtitle: 'Adaptive HLS (240p–1080p) · Dynamic Woodland & Twilight Tones',
+    streamBadge: 'v10 · 3D HLS ABR · 03 / 04',
+    luminanceNote: '3D Animation',
     src: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
     isHls: true,
     supportsCors: true,
     poster: darkPoster,
     chaptersUrl: createBlobUrl(CHAPTERS_VTT, 'text/vtt'),
-    captionsUrl: SHARED_CAPTIONS_URL,
     introWindow: [2, 8],
+    subtitleTracks: makeTracks(
+      'dark',
+      [
+        { start: 0.5, end: 7.0, text: '[Birds chirping softly in a sunlit woodland clearing]' },
+        { start: 7.5, end: 15.0, text: '[Morning mist lifting above green hillside grass]' },
+        { start: 15.5, end: 26.0, text: '[Gentle orchestral flute melody enters]' },
+        { start: 26.5, end: 40.0, text: '[Rabbit steps out from burrow into warm daylight]' },
+      ],
+      [
+        { start: 0.5, end: 7.0, text: '[Pájaros cantando suavemente en un claro del bosque]' },
+        { start: 7.5, end: 15.0, text: '[La niebla matinal se disipa sobre la colina verde]' },
+        { start: 15.5, end: 26.0, text: '[Suave melodía orquestal de flauta]' },
+        { start: 26.5, end: 40.0, text: '[El conejo sale de su madriguera hacia la luz del día]' },
+      ]
+    ),
+  },
+  {
+    id: 'mux-skate',
+    title: 'Concrete Flow — Urban Skate Cinema',
+    subtitle: 'Fast-Buffer Mux VOD HLS · Warm Asphalt & Sunlit Action',
+    streamBadge: 'v10 · ACTION HLS · 04 / 04',
+    luminanceNote: 'Urban Action',
+    src: 'https://stream.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM.m3u8',
+    muxPlaybackId: 'BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM',
+    isHls: true,
+    supportsCors: true,
+    poster: 'https://image.mux.com/BV3YZtogl89mg9VcNBhhnHm02Y34zI1nlMuMQfAbl3dM/thumbnail.jpg?width=1280',
+    chaptersUrl: createBlobUrl(CHAPTERS_VTT, 'text/vtt'),
+    introWindow: [2, 8],
+    subtitleTracks: makeTracks(
+      'mux-skate',
+      [
+        { start: 0.4, end: 5.5, text: '[Urethane wheels rolling rhythmically across concrete plaza]' },
+        { start: 6.0, end: 13.0, text: '[Low-angle chase camera tracks sunlit handrail grind]' },
+        { start: 13.5, end: 22.0, text: '[Sharp wooden deck snap echoes off urban walls]' },
+        { start: 22.5, end: 34.0, text: '[Clean landing and carve beneath warm dusk skyline]' },
+      ],
+      [
+        { start: 0.4, end: 5.5, text: '[Ruedas de uretano rodando con ritmo sobre concreto]' },
+        { start: 6.0, end: 13.0, text: '[Cámara baja sigue el deslizamiento sobre la baranda]' },
+        { start: 13.5, end: 22.0, text: '[Golpe seco de la tabla resuena en la plaza urbana]' },
+        { start: 22.5, end: 34.0, text: '[Aterrizaje limpio bajo el cielo cálido del atardecer]' },
+      ]
+    ),
   },
 ];
 

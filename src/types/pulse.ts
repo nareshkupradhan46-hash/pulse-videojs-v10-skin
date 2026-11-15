@@ -12,11 +12,28 @@ export interface PulseAccessibilityState {
   largeText: boolean;
 }
 
+export type SubtitlePosition = 'bottom' | 'top';
+export type SubtitleEdgeStyle = 'box' | 'outline' | 'shadow' | 'clean';
+
 export interface SubtitleStyleState {
   fontSize: 'sm' | 'md' | 'lg';
   color: '#F8FAFC' | '#FDE047' | '#10F56E';
   bgOpacity: number;
+  position: SubtitlePosition;
+  edgeStyle: SubtitleEdgeStyle;
+  syncOffsetSec: number;
+  pauseOnCueClick: boolean;
 }
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleState = {
+  fontSize: 'md',
+  color: '#F8FAFC',
+  bgOpacity: 0.88,
+  position: 'bottom',
+  edgeStyle: 'box',
+  syncOffsetSec: 0,
+  pauseOnCueClick: false,
+};
 
 export interface FrameBookmark {
   id: string;

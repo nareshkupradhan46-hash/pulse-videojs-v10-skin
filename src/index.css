@@ -1990,12 +1990,12 @@
     }
 
     .cadence-top-bar {
-      padding: 6px 8px 0;
+      padding: 12px 14px 0;
     }
 
     .cadence-telemetry-pill {
       max-width: 66%;
-      padding: 1px 2px;
+      padding: 2px 4px;
     }
 
     .cadence-telemetry-title {
@@ -2004,7 +2004,7 @@
 
     .cadence-center-stage {
       position: absolute;
-      inset: 28px 0 68px 0;
+      inset: 36px 0 68px 0;
       margin: 0;
       gap: 14px;
       align-items: center;
@@ -2169,7 +2169,7 @@
     }
 
     .cadence-center-stage {
-      inset: 24px 0 64px 0;
+      inset: 32px 0 64px 0;
       padding-top: 0;
       gap: 10px;
     }

@@ -1734,21 +1734,8 @@ export function CadenceVideoSkin({
               )}
             </div>
 
-            {/* Center Reverse / Play / Forward Hero Triggers when paused */}
+            {/* Center Play Hero Trigger when paused */}
             <div className="cadence-center-stage">
-              <SeekButton
-                seconds={-10}
-                render={(props) => (
-                  <button
-                    {...props}
-                    className="cadence-center-seek"
-                    aria-label="Reverse 10 seconds"
-                  >
-                    <Rewind className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
-                  </button>
-                )}
-              />
-
               <PlayButton
                 render={(props, state) => (
                   <button
@@ -1765,19 +1752,6 @@ export function CadenceVideoSkin({
                     ) : (
                       <CleanPauseIcon className="w-7 h-7 shrink-0" />
                     )}
-                  </button>
-                )}
-              />
-
-              <SeekButton
-                seconds={10}
-                render={(props) => (
-                  <button
-                    {...props}
-                    className="cadence-center-seek"
-                    aria-label="Forward 10 seconds"
-                  >
-                    <FastForward className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
                   </button>
                 )}
               />

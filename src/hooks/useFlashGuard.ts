@@ -52,7 +52,9 @@ export function useFlashGuard(
     }
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const ctx =
+      canvas.getContext('2d', { willReadFrequently: true }) ??
+      canvas.getContext('2d');
     if (!ctx) return;
 
     // WCAG 2.3.1-inspired thresholds tuned by preset
@@ -83,7 +85,7 @@ export function useFlashGuard(
       if (cancelled) return;
       rafId = requestAnimationFrame(sampleFrame);
 
-      if (videoEl.readyState < 2) return;
+      if (videoEl.readyState < 2 || videoEl.videoWidth === 0 || videoEl.videoHeight === 0) return;
 
       const dt = lastSampleTime > 0 ? now - lastSampleTime : 66;
       if (dt < 66) return;

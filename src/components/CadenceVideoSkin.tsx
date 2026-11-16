@@ -97,6 +97,7 @@ import {
   type SubtitleEdgeStyle,
   type SubtitleStyleState,
 } from '../types/pulse';
+import { copyTextToClipboard } from '../utils/clipboard';
 import {
   cuesToVtt,
   formatTimecode,
@@ -228,6 +229,23 @@ function relativeRgbLuminance(rgbStr: string): number {
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
   };
   return 0.2126 * lin(parts[0]) + 0.7152 * lin(parts[1]) + 0.0722 * lin(parts[2]);
+}
+
+function mixRgb(
+  rgbStr: string,
+  target: [number, number, number],
+  targetWeight: number
+): string {
+  const parts = rgbStr.split(',').map((s) => Number(s.trim()));
+  const base: [number, number, number] =
+    parts.length === 3 && !parts.some((n) => Number.isNaN(n))
+      ? [parts[0], parts[1], parts[2]]
+      : [255, 107, 0];
+  const w = Math.max(0, Math.min(1, targetWeight));
+  const r = Math.round(base[0] * (1 - w) + target[0] * w);
+  const g = Math.round(base[1] * (1 - w) + target[1] * w);
+  const b = Math.round(base[2] * (1 - w) + target[2] * w);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function contrastTextForRgb(rgbStr: string): string {
@@ -663,16 +681,27 @@ export function CadenceVideoSkin({
     syncTextTracksFromDom();
     const onTrackChange = () => syncTextTracksFromDom();
 
+    const tracks = video.textTracks;
+    const hasTrackEvents = typeof tracks?.addEventListener === 'function';
+
     video.addEventListener('loadedmetadata', onTrackChange);
-    video.textTracks?.addEventListener('change', onTrackChange);
-    video.textTracks?.addEventListener('addtrack', onTrackChange);
-    video.textTracks?.addEventListener('removetrack', onTrackChange);
+    if (hasTrackEvents) {
+      tracks.addEventListener('change', onTrackChange);
+      tracks.addEventListener('addtrack', onTrackChange);
+      tracks.addEventListener('removetrack', onTrackChange);
+    } else if (tracks) {
+      tracks.onchange = onTrackChange;
+    }
 
     return () => {
       video.removeEventListener('loadedmetadata', onTrackChange);
-      video.textTracks?.removeEventListener('change', onTrackChange);
-      video.textTracks?.removeEventListener('addtrack', onTrackChange);
-      video.textTracks?.removeEventListener('removetrack', onTrackChange);
+      if (hasTrackEvents) {
+        tracks.removeEventListener('change', onTrackChange);
+        tracks.removeEventListener('addtrack', onTrackChange);
+        tracks.removeEventListener('removetrack', onTrackChange);
+      } else if (tracks && tracks.onchange === onTrackChange) {
+        tracks.onchange = null;
+      }
     };
   }, [playerContainer, reel.id, customSubtitleTrack?.id, syncTextTracksFromDom]);
 
@@ -770,12 +799,10 @@ export function CadenceVideoSkin({
     const text = activeTrackCues
       .map((c) => `[${formatTimecode(c.start)}] ${c.text}`)
       .join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
       setTranscriptCopied(true);
       window.setTimeout(() => setTranscriptCopied(false), 1800);
-    } catch {
-      // Clipboard blocked in restricted frame
     }
   };
 
@@ -787,6 +814,7 @@ export function CadenceVideoSkin({
     const a = document.createElement('a');
     a.href = url;
     a.download = `${reel.id}-subtitles.vtt`;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -798,7 +826,10 @@ export function CadenceVideoSkin({
     e.target.value = '';
     if (!file) return;
     try {
-      const text = await file.text();
+      const text =
+        typeof file.text === 'function'
+          ? await file.text()
+          : await new Response(file).text();
       const { vttBlobUrl, cues } = parseSubtitlesFile(text);
       const baseName = file.name.replace(/\.(vtt|srt)$/i, '').slice(0, 22);
       const customTrack: ReelSubtitleTrack = {
@@ -872,24 +903,24 @@ export function CadenceVideoSkin({
     const videoLum = relativeRgbLuminance(videoRgb);
     const adaptiveBorder =
       videoLum < 0.16
-        ? `color-mix(in srgb, rgb(${videoRgb}) 64%, #ffffff 36%)`
+        ? mixRgb(videoRgb, [255, 255, 255], 0.36)
         : `rgba(${videoRgb}, 0.78)`;
     const adaptiveHoverBorder =
       videoLum < 0.16
-        ? `color-mix(in srgb, rgb(${videoRgb}) 72%, #ffffff 28%)`
+        ? mixRgb(videoRgb, [255, 255, 255], 0.28)
         : `rgb(${videoRgb})`;
     const adaptiveHoverFg = contrastTextForRgb(videoRgb);
     const adaptiveIconColor =
       videoLum >= 0.24
         ? `rgb(${videoRgb})`
-        : `color-mix(in srgb, rgb(${videoRgb}) 68%, #ffffff 32%)`;
+        : mixRgb(videoRgb, [255, 255, 255], 0.32);
     const adaptiveActiveFg =
       videoLum >= 0.26
         ? `rgb(${videoRgb})`
-        : `color-mix(in srgb, rgb(${videoRgb}) 64%, #ffffff 36%)`;
+        : mixRgb(videoRgb, [255, 255, 255], 0.36);
     const lightAdoptedBg =
       videoLum > 0.36
-        ? `color-mix(in srgb, rgb(${videoRgb}) 78%, #09090b 22%)`
+        ? mixRgb(videoRgb, [9, 9, 11], 0.22)
         : `rgb(${videoRgb})`;
     const lightAdoptedFg = contrastTextForRgb(
       videoLum > 0.36 ? '17, 24, 39' : videoRgb
@@ -2120,7 +2151,7 @@ export function CadenceVideoSkin({
                       <Popover.Popup className="cadence-subtitles-popup">
                         <div className="cadence-subtitles-panel">
                           {/* Studio Header + One-Click Master Toggle */}
-                          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-current/12">
+                          <div className="flex items-center justify-between gap-2 pb-2.5 cadence-sub-divider-b">
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5 text-xs font-semibold">
                                 <Captions
@@ -2158,7 +2189,7 @@ export function CadenceVideoSkin({
                           </div>
 
                           {/* Mode Tabs: Controls vs Live Transcript */}
-                          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-current/8 border border-current/15 my-2.5">
+                          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl cadence-sub-well my-2.5">
                             <button
                               type="button"
                               onClick={() => setSubtitlesTab('controls')}
@@ -2193,7 +2224,7 @@ export function CadenceVideoSkin({
                                   <button
                                     type="button"
                                     onClick={() => subtitleFileInputRef.current?.click()}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-current/25 bg-current/8 hover:bg-current/15 text-[10.5px] font-semibold cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md cadence-sub-btn text-[10.5px] font-semibold cursor-pointer"
                                   >
                                     <Upload className="w-3 h-3" aria-hidden="true" />
                                     <span>{subtitleUploadMsg ?? 'Load .vtt/.srt'}</span>
@@ -2211,10 +2242,10 @@ export function CadenceVideoSkin({
                                     <button
                                       type="button"
                                       onClick={() => setSubtitleTrackMode(null)}
-                                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left cursor-pointer transition-colors ${
                                         !subtitlesActive
-                                          ? 'border-current/45 bg-current/12 font-semibold'
-                                          : 'border-transparent hover:bg-current/8 opacity-80'
+                                          ? 'cadence-sub-track-active font-semibold'
+                                          : 'cadence-sub-track-idle opacity-80'
                                       }`}
                                     >
                                       <span>Off (Disabled)</span>
@@ -2229,10 +2260,10 @@ export function CadenceVideoSkin({
                                           key={`${tr.index}-${tr.label}`}
                                           type="button"
                                           onClick={() => setSubtitleTrackMode(tr.index)}
-                                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-left cursor-pointer transition-colors ${
+                                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left cursor-pointer transition-colors ${
                                             selected
-                                              ? 'border-current/45 bg-current/12 font-semibold'
-                                              : 'border-transparent hover:bg-current/8 opacity-85'
+                                              ? 'cadence-sub-track-active font-semibold'
+                                              : 'cadence-sub-track-idle opacity-85'
                                           }`}
                                         >
                                           <span className="truncate">{tr.label}</span>
@@ -2246,12 +2277,12 @@ export function CadenceVideoSkin({
                               </div>
 
                               {/* Timing Sync Offset (-2.0s to +2.0s) */}
-                              <div className="pt-2 border-t border-current/12 flex items-center justify-between gap-2">
+                              <div className="pt-2 cadence-sub-divider-t flex items-center justify-between gap-2">
                                 <div>
                                   <span className="block font-medium">Timing Sync</span>
                                   <span className="text-[10px] opacity-70">Nudge early / late</span>
                                 </div>
-                                <div className="inline-flex items-center gap-1 rounded-lg bg-current/8 border border-current/20 p-0.5 font-mono-tabular">
+                                <div className="inline-flex items-center gap-1 rounded-lg cadence-sub-well p-0.5 font-mono-tabular">
                                   <button
                                     type="button"
                                     aria-label="Delay subtitles by 0.25 seconds"
@@ -2263,7 +2294,7 @@ export function CadenceVideoSkin({
                                         ),
                                       })
                                     }
-                                    className="p-1 rounded hover:bg-current/15 cursor-pointer"
+                                    className="p-1 rounded cadence-sub-icon-btn cursor-pointer"
                                   >
                                     <Minus className="w-3 h-3" aria-hidden="true" />
                                   </button>
@@ -2287,7 +2318,7 @@ export function CadenceVideoSkin({
                                         ),
                                       })
                                     }
-                                    className="p-1 rounded hover:bg-current/15 cursor-pointer"
+                                    className="p-1 rounded cadence-sub-icon-btn cursor-pointer"
                                   >
                                     <Plus className="w-3 h-3" aria-hidden="true" />
                                   </button>
@@ -2295,10 +2326,10 @@ export function CadenceVideoSkin({
                               </div>
 
                               {/* Position (Bottom / Top) & Font Size */}
-                              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-current/12">
+                              <div className="grid grid-cols-2 gap-2 pt-2 cadence-sub-divider-t">
                                 <div>
                                   <span className="block opacity-75 mb-1">Position</span>
-                                  <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                  <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg cadence-sub-well">
                                     <button
                                       type="button"
                                       onClick={() => onUpdateSubtitleStyle?.({ position: 'bottom' })}
@@ -2328,7 +2359,7 @@ export function CadenceVideoSkin({
 
                                 <div>
                                   <span className="block opacity-75 mb-1">Size</span>
-                                  <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                  <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg cadence-sub-well">
                                     {(['sm', 'md', 'lg'] as const).map((sz) => (
                                       <button
                                         key={sz}
@@ -2350,7 +2381,7 @@ export function CadenceVideoSkin({
                               {/* Edge Style */}
                               <div>
                                 <span className="block opacity-75 mb-1">Edge Style</span>
-                                <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg bg-current/8 border border-current/15">
+                                <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg cadence-sub-well">
                                   {(
                                     [
                                       { id: 'box', label: 'Box' },
@@ -2426,7 +2457,7 @@ export function CadenceVideoSkin({
                               </div>
 
                               {/* Click Cue to Pause + Reset */}
-                              <div className="pt-2 border-t border-current/12 flex items-center justify-between gap-2">
+                              <div className="pt-2 cadence-sub-divider-t flex items-center justify-between gap-2">
                                 <label className="inline-flex items-center gap-2 cursor-pointer">
                                   <input
                                     type="checkbox"
@@ -2457,7 +2488,7 @@ export function CadenceVideoSkin({
                                 <button
                                   type="button"
                                   onClick={handleCopyTranscript}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-current/8 border border-current/20 hover:bg-current/15 cursor-pointer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg cadence-sub-btn cursor-pointer"
                                 >
                                   <Copy className="w-3 h-3" aria-hidden="true" />
                                   <span>{transcriptCopied ? 'Copied!' : 'Copy All'}</span>
@@ -2465,7 +2496,7 @@ export function CadenceVideoSkin({
                                 <button
                                   type="button"
                                   onClick={handleDownloadVtt}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-current/8 border border-current/20 hover:bg-current/15 cursor-pointer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg cadence-sub-btn cursor-pointer"
                                 >
                                   <Download className="w-3 h-3" aria-hidden="true" />
                                   <span>Export .vtt</span>
@@ -2494,8 +2525,8 @@ export function CadenceVideoSkin({
                                         }}
                                         className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
                                           isCurrent
-                                            ? 'bg-current/15 font-semibold'
-                                            : 'hover:bg-current/8 opacity-85'
+                                            ? 'cadence-sub-track-active font-semibold'
+                                            : 'cadence-sub-track-idle opacity-85'
                                         }`}
                                       >
                                         <span

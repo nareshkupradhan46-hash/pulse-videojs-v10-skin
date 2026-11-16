@@ -313,6 +313,16 @@ export default function App() {
     const onLeavePip = () => {
       setNativePipActive(false);
     };
+    const onWebkitPresentationChange = () => {
+      const webkitVideo = videoEl as HTMLVideoElement & {
+        webkitPresentationMode?: string;
+      };
+      const isWebkitPip = webkitVideo.webkitPresentationMode === 'picture-in-picture';
+      setNativePipActive(isWebkitPip);
+      if (isWebkitPip) {
+        setFloatingPipActive(false);
+      }
+    };
 
     let cancelled = false;
     userToggledSubtitlesRef.current = false;
@@ -400,6 +410,7 @@ export default function App() {
     videoEl.addEventListener('seeked', onSeeked);
     videoEl.addEventListener('enterpictureinpicture', onEnterPip);
     videoEl.addEventListener('leavepictureinpicture', onLeavePip);
+    videoEl.addEventListener('webkitpresentationmodechanged', onWebkitPresentationChange);
 
     return () => {
       cancelled = true;
@@ -414,6 +425,7 @@ export default function App() {
       videoEl.removeEventListener('seeked', onSeeked);
       videoEl.removeEventListener('enterpictureinpicture', onEnterPip);
       videoEl.removeEventListener('leavepictureinpicture', onLeavePip);
+      videoEl.removeEventListener('webkitpresentationmodechanged', onWebkitPresentationChange);
     };
   }, [videoEl, activeMediaKey, activeReelIndex, isCustomMux]);
 
@@ -625,14 +637,36 @@ export default function App() {
     setBookmarks((prev) => prev.filter((b) => b.id !== id));
   };
 
-  const handleDownloadClip = () => {
-    const a = document.createElement('a');
-    a.href = activeSrc;
-    a.download = `${activeReel.id}-pulse-v10.${useHlsAdapter ? 'm3u8' : 'mp4'}`;
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleDownloadClip = async () => {
+    const filename = `${activeReel.id}-pulse-v10.${useHlsAdapter ? 'm3u8' : 'mp4'}`;
+    const triggerAnchorDownload = (href: string) => {
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = filename;
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    };
+
+    if (activeSrc.startsWith('blob:') || activeSrc.startsWith(window.location.origin)) {
+      triggerAnchorDownload(activeSrc);
+      return;
+    }
+
+    try {
+      const res = await fetch(activeSrc, { mode: 'cors' });
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        triggerAnchorDownload(blobUrl);
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 2500);
+        return;
+      }
+    } catch {
+      // Avoid navigating the current tab/iframe away on cross-origin URLs when CORS download fails
+    }
   };
 
   const activeBookmarks = useMemo(
@@ -690,7 +724,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-[#0B0B0D] text-[#F4F4F0] flex flex-col overflow-x-clip"
+      className="min-h-screen bg-[#0B0B0D] text-[#F4F4F0] flex flex-col [overflow-x:hidden] [overflow-x:clip]"
       style={
         {
           '--pulse-video-rgb': ambientRgb,
@@ -907,7 +941,7 @@ export default function App() {
                         <span className="text-zinc-400">Custom Skin</span>
                       </div>
                     )}
-                    <div className="aspect-video w-full max-w-full max-h-[75dvh] mx-auto relative overflow-hidden">
+                    <div className="aspect-video w-full max-w-full [max-height:75vh] max-h-[75dvh] mx-auto relative overflow-hidden">
                       <VideoPlayer
                         key={`${activeReel.id}-${muxPlaybackId}-${isUsingFallback ? 'fb' : 'cdn'}`}
                       >
@@ -1059,7 +1093,7 @@ export default function App() {
                         </span>
                         <span className="text-zinc-400">@videojs/react/video</span>
                       </div>
-                      <div className="aspect-video w-full max-w-full max-h-[75dvh] mx-auto relative overflow-hidden">
+                      <div className="aspect-video w-full max-w-full [max-height:75vh] max-h-[75dvh] mx-auto relative overflow-hidden">
                         <VideoPlayer
                           key={`compare-${activeReel.id}-${muxPlaybackId}-${isUsingFallback ? 'fb' : 'cdn'}`}
                         >

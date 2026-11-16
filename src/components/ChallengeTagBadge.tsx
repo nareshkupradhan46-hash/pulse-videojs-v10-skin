@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 export type TagBadgeVariant = 'obsidian' | 'paper' | 'glass';
 export type TagBadgeSize = 'compact' | 'standard' | 'display';
@@ -129,12 +130,10 @@ export function ChallengeTagBadge({
 
   const handleCopy = async () => {
     if (!copyable) return;
-    try {
-      await navigator.clipboard.writeText(`#${label}`);
-      setCopied(true);
+    const ok = await copyTextToClipboard(`#${label}`);
+    setCopied(ok);
+    if (ok) {
       window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
     }
   };
 

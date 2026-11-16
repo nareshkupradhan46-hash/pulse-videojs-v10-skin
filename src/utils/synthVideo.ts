@@ -287,8 +287,20 @@ export async function generateFallbackVideoBlob(
 
   if (!mimeType) return null;
 
-  const stream = canvas.captureStream(30);
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_500_000 });
+  const captureCanvas = canvas as HTMLCanvasElement & {
+    captureStream?: (frameRate?: number) => MediaStream;
+    mozCaptureStream?: (frameRate?: number) => MediaStream;
+  };
+  const captureFn = captureCanvas.captureStream ?? captureCanvas.mozCaptureStream;
+  if (typeof captureFn !== 'function') return null;
+
+  const stream = captureFn.call(canvas, 30);
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 1_500_000 });
+  } catch {
+    return null;
+  }
   const chunks: BlobPart[] = [];
 
   recorder.ondataavailable = (e) => {

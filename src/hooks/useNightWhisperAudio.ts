@@ -172,13 +172,13 @@ export function useNightWhisperAudio(
     }
 
     setDspAvailable(true);
-    if (graph.ctx.state === 'suspended') {
+    if (graph.ctx.state === 'suspended' && typeof graph.ctx.resume === 'function') {
       void graph.ctx.resume().catch(() => {});
     }
     applyNightModeParams(graph, mode);
 
     const onPlay = () => {
-      if (graph.ctx.state === 'suspended') {
+      if (graph.ctx.state === 'suspended' && typeof graph.ctx.resume === 'function') {
         void graph.ctx.resume().catch(() => {});
       }
     };
@@ -189,7 +189,14 @@ export function useNightWhisperAudio(
         setCompressionDb((prev) => (prev === 0 ? prev : 0));
         return;
       }
-      const red = Math.round(graph.compressor.reduction * 10) / 10;
+      const rawReduction = graph.compressor.reduction as unknown;
+      const reductionVal =
+        typeof rawReduction === 'number'
+          ? rawReduction
+          : typeof (rawReduction as { value?: unknown })?.value === 'number'
+            ? (rawReduction as { value: number }).value
+            : 0;
+      const red = Math.round(reductionVal * 10) / 10;
       const next = Math.abs(red) < 0.1 ? 0 : red;
       setCompressionDb((prev) => (prev === next ? prev : next));
     }, 350);
@@ -209,7 +216,7 @@ export function useNightWhisperAudio(
         const graph = elementGraphMap.get(target);
         if (graph) {
           elementGraphMap.delete(target);
-          if (graph.ctx.state !== 'closed') {
+          if (graph.ctx.state !== 'closed' && typeof graph.ctx.close === 'function') {
             void graph.ctx.close().catch(() => {});
           }
         }

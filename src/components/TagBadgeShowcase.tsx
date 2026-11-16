@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { Check, Copy, Maximize, Sun, Moon, Layers } from 'lucide-react';
 import { ChallengeTagBadge, type TagBadgeSize, type TagBadgeVariant } from './ChallengeTagBadge';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 const SUFFIX_OPTIONS = ['v10', '2026', 'Apache-2.0', ''] as const;
 
@@ -25,12 +26,10 @@ export const TagBadgeShowcase = memo(function TagBadgeShowcase() {
 />`;
 
   const handleCopySnippet = async () => {
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopiedCode(true);
+    const ok = await copyTextToClipboard(snippet);
+    setCopiedCode(ok);
+    if (ok) {
       window.setTimeout(() => setCopiedCode(false), 1800);
-    } catch {
-      setCopiedCode(false);
     }
   };
 

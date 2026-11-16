@@ -107,8 +107,16 @@ export function useLiveColorSampling(
       source: HTMLVideoElement | HTMLImageElement,
       lerpFactor: number
     ): boolean => {
+      if (source instanceof HTMLVideoElement) {
+        if (source.videoWidth === 0 || source.videoHeight === 0) return false;
+      } else if (source.naturalWidth === 0 || source.naturalHeight === 0) {
+        return false;
+      }
+
       const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d', { willReadFrequently: true });
+      const ctx =
+        canvas?.getContext('2d', { willReadFrequently: true }) ??
+        canvas?.getContext('2d');
       if (!canvas || !ctx) return false;
 
       try {

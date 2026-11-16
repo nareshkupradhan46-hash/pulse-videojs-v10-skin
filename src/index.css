@@ -46,6 +46,7 @@
     --pulse-ring: var(--pulse-accent);
     --pulse-transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
 
+    --pulse-cue-size: clamp(0.875rem, 1.8vw, 1.125rem);
     --pulse-cue-size: clamp(0.875rem, 1.8cqi, 1.125rem);
     --pulse-cue-color: #f8fafc;
     --pulse-cue-bg: rgba(10, 10, 13, 0.88);
@@ -58,11 +59,14 @@
     box-sizing: border-box;
     container-type: inline-size;
     container-name: media-root;
+    isolation: isolate;
     background-color: #050507;
     color: var(--pulse-ink);
     font-family: var(--font-sans);
     overflow: hidden;
+    -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
     outline: none;
   }
 
@@ -158,16 +162,56 @@
     filter: brightness(calc(var(--pulse-video-brightness, 1) * var(--pulse-guard-brightness, 1))) contrast(calc(var(--pulse-guard-contrast, 1) * var(--pulse-hires-contrast, 1))) saturate(var(--pulse-hires-saturate, 1));
   }
 
-  .cadence-skin[data-fullscreen],
+  .cadence-skin[data-fullscreen] {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+  }
+
   .cadence-skin:fullscreen {
     width: 100%;
     height: 100%;
     max-width: 100vw;
+    max-height: 100vh;
     max-height: 100dvh;
   }
 
-  .cadence-skin[data-fullscreen] video,
+  .cadence-skin:-webkit-full-screen {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+  }
+
+  .cadence-skin:-moz-full-screen {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+
+  .cadence-skin[data-fullscreen] video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
   .cadence-skin:fullscreen video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .cadence-skin:-webkit-full-screen video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .cadence-skin:-moz-full-screen video {
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -213,7 +257,7 @@
   .cadence-skin[data-controls-visible] .cadence-cue-stage-bottom,
   .cadence-skin[data-paused] .cadence-cue-stage-bottom,
   .cadence-skin[data-force-controls="true"] .cadence-cue-stage-bottom,
-  .cadence-skin:has(:focus-visible) .cadence-cue-stage-bottom {
+  .cadence-skin:focus-within .cadence-cue-stage-bottom {
     bottom: 118px;
   }
 
@@ -314,12 +358,12 @@
   .cadence-skin[data-controls-visible] .cadence-controls-root,
   .cadence-skin[data-paused] .cadence-controls-root,
   .cadence-skin[data-force-controls="true"] .cadence-controls-root,
-  .cadence-skin:has(:focus-visible) .cadence-controls-root {
+  .cadence-skin:focus-within .cadence-controls-root {
     opacity: 1;
   }
 
-  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:has(:focus-visible)) .cadence-controls-root,
-  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:has(:focus-visible)) .cadence-controls-root * {
+  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:focus-within) .cadence-controls-root,
+  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:focus-within) .cadence-controls-root * {
     pointer-events: none !important;
   }
 
@@ -338,7 +382,7 @@
   .cadence-skin[data-controls-visible] .cadence-backdrop,
   .cadence-skin[data-paused] .cadence-backdrop,
   .cadence-skin[data-force-controls="true"] .cadence-backdrop,
-  .cadence-skin:has(:focus-visible) .cadence-backdrop {
+  .cadence-skin:focus-within .cadence-backdrop {
     opacity: 1;
   }
 
@@ -726,6 +770,13 @@
     inset-block: 0;
     left: 0;
     width: var(--media-slider-fill, 0%);
+    background: rgb(var(--pulse-video-rgb, 255, 107, 0));
+    background: linear-gradient(
+      90deg,
+      rgba(var(--pulse-video-rgb, 255, 107, 0), 0.78) 0%,
+      rgb(var(--pulse-video-rgb, 255, 107, 0)) 85%,
+      rgba(255, 255, 255, 0.92) 100%
+    );
     background: linear-gradient(
       90deg,
       rgba(var(--pulse-video-rgb, 255, 107, 0), 0.78) 0%,
@@ -1278,6 +1329,7 @@
     --media-popup-side-offset: 12px;
     --media-popover-side-offset: 12px;
     z-index: 42;
+    width: min(310px, calc(100% - 24px));
     width: min(310px, calc(100cqi - 24px));
     max-height: min(var(--media-popover-available-height, 360px), 360px);
     border-radius: 16px;
@@ -1310,6 +1362,52 @@
     background-color: var(--pulse-menu-pill-bg, #ff6b00);
     color: var(--pulse-menu-pill-fg, #09090b);
     border: 1px solid var(--pulse-menu-pill-bg, #ff6b00);
+  }
+
+  .cadence-sub-divider-b {
+    border-bottom: 1px solid var(--pulse-menu-sep, rgba(255, 255, 255, 0.14));
+  }
+
+  .cadence-sub-divider-t {
+    border-top: 1px solid var(--pulse-menu-sep, rgba(255, 255, 255, 0.14));
+  }
+
+  .cadence-sub-well {
+    background-color: rgba(128, 128, 128, 0.12);
+    border: 1px solid var(--pulse-menu-sep, rgba(255, 255, 255, 0.16));
+  }
+
+  .cadence-sub-btn {
+    background-color: rgba(128, 128, 128, 0.12);
+    border: 1px solid var(--pulse-menu-sep, rgba(255, 255, 255, 0.22));
+    transition: background-color 140ms ease, border-color 140ms ease;
+  }
+
+  .cadence-sub-btn:hover {
+    background-color: var(--pulse-menu-hover-bg, rgba(255, 255, 255, 0.16));
+  }
+
+  .cadence-sub-icon-btn {
+    background: transparent;
+    transition: background-color 140ms ease;
+  }
+
+  .cadence-sub-icon-btn:hover {
+    background-color: var(--pulse-menu-hover-bg, rgba(255, 255, 255, 0.16));
+  }
+
+  .cadence-sub-track-active {
+    border: 1px solid var(--pulse-menu-accent, rgba(255, 255, 255, 0.45));
+    background-color: var(--pulse-menu-item-active-bg, rgba(255, 107, 0, 0.18));
+  }
+
+  .cadence-sub-track-idle {
+    border: 1px solid transparent;
+    background-color: transparent;
+  }
+
+  .cadence-sub-track-idle:hover {
+    background-color: var(--pulse-menu-hover-bg, rgba(255, 255, 255, 0.1));
   }
 
   .cadence-menu-content {
@@ -1783,7 +1881,9 @@
     height: 22px;
     padding: 0 7px;
     border-radius: 6px;
+    background: rgba(255, 255, 255, 0.12);
     background: color-mix(in srgb, var(--pulse-accent) 16%, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--pulse-accent);
     border: 1px solid color-mix(in srgb, var(--pulse-accent) 55%, transparent);
     border-bottom-width: 2px;
     font-family: var(--font-mono);
@@ -1826,13 +1926,13 @@
   }
 
   /* Responsive Container Queries (320px - 1920px+) */
-  @container media-root (width >= 520px) {
+  @container media-root (min-width: 520px) {
     .cadence-volume-popup {
       display: none !important;
     }
   }
 
-  @container media-root (width < 680px) {
+  @container media-root (max-width: 679px) {
     .cadence-hide-md {
       display: none !important;
     }
@@ -1863,7 +1963,7 @@
     }
   }
 
-  @container media-root (width < 620px) {
+  @container media-root (max-width: 619px) {
     .cadence-btn {
       min-width: 40px;
       min-height: 40px;
@@ -1884,7 +1984,7 @@
     }
   }
 
-  @container media-root (width < 520px) {
+  @container media-root (max-width: 519px) {
     .cadence-hide-xs {
       display: none !important;
     }
@@ -2015,12 +2115,12 @@
       bottom: 12px;
     }
 
-    .cadence-skin[data-controls-visible] .cadence-cue-stage-bottom,
-    .cadence-skin[data-paused] .cadence-cue-stage-bottom,
-    .cadence-skin[data-force-controls="true"] .cadence-cue-stage-bottom,
-    .cadence-skin:has(:focus-visible) .cadence-cue-stage-bottom {
-      bottom: 72px;
-    }
+  .cadence-skin[data-controls-visible] .cadence-cue-stage-bottom,
+  .cadence-skin[data-paused] .cadence-cue-stage-bottom,
+  .cadence-skin[data-force-controls="true"] .cadence-cue-stage-bottom,
+  .cadence-skin:focus-within .cadence-cue-stage-bottom {
+    bottom: 72px;
+  }
 
     .cadence-menu-popup,
     .cadence-subtitles-popup {
@@ -2046,7 +2146,7 @@
     }
   }
 
-  @container media-root (width < 360px) {
+  @container media-root (max-width: 359px) {
     .cadence-controls-group {
       gap: 3px;
     }

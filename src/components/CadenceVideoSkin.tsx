@@ -252,6 +252,36 @@ function contrastTextForRgb(rgbStr: string): string {
   return relativeRgbLuminance(rgbStr) > 0.42 ? '#09090b' : '#ffffff';
 }
 
+function CleanPlayIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={className}
+    >
+      <path
+        d="M7.5 5.25C7.5 4.42 8.4 3.91 9.11 4.34L19.15 10.34C19.84 10.75 19.84 11.75 19.15 12.16L9.11 18.16C8.4 18.59 7.5 18.08 7.5 17.25V5.25Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function CleanPauseIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={className}
+    >
+      <rect x="6.5" y="5" width="3.75" height="14" rx="1.25" fill="currentColor" />
+      <rect x="13.75" y="5" width="3.75" height="14" rx="1.25" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function CadenceVideoSkin({
   children,
   reel,
@@ -975,30 +1005,30 @@ export function CadenceVideoSkin({
             '--pulse-switch-thumb': '#ffffff',
           }
         : {
-            '--pulse-btn-bg': 'rgba(250, 250, 249, 0.94)',
+            '--pulse-btn-bg': 'rgba(255, 255, 255, 0.95)',
             '--pulse-btn-fg': '#09090b',
             '--pulse-btn-border': lightAdoptedBg,
             '--pulse-btn-shadow':
-              `0 0 0 1px rgba(255, 255, 255, 0.92), 0 4px 12px rgba(0, 0, 0, 0.22)`,
-            '--pulse-btn-hover-bg': lightAdoptedBg,
-            '--pulse-btn-hover-fg': lightAdoptedFg,
+              '0 0 0 1px rgba(255, 255, 255, 0.92), 0 4px 12px rgba(0, 0, 0, 0.22)',
+            '--pulse-btn-hover-bg': '#ffffff',
+            '--pulse-btn-hover-fg': '#09090b',
             '--pulse-btn-hover-border': lightAdoptedBg,
             '--pulse-btn-hover-shadow':
-              `0 0 0 2px rgba(255, 255, 255, 0.92), 0 6px 16px rgba(${videoRgb}, 0.34)`,
-            '--pulse-btn-active-bg': lightAdoptedBg,
-            '--pulse-btn-active-fg': lightAdoptedFg,
+              `0 0 0 1.5px ${lightAdoptedBg}, 0 6px 14px rgba(0, 0, 0, 0.24)`,
+            '--pulse-btn-active-bg': '#ffffff',
+            '--pulse-btn-active-fg': '#09090b',
             '--pulse-btn-active-border': lightAdoptedBg,
             '--pulse-btn-active-shadow':
-              `0 0 0 2px rgba(255, 255, 255, 0.94), 0 6px 18px rgba(${videoRgb}, 0.38)`,
-            '--pulse-center-bg': lightAdoptedBg,
-            '--pulse-center-fg': lightAdoptedFg,
-            '--pulse-center-border': '#ffffff',
+              `0 0 0 1.5px ${lightAdoptedBg}, 0 4px 12px rgba(0, 0, 0, 0.22)`,
+            '--pulse-center-bg': 'rgba(255, 255, 255, 0.95)',
+            '--pulse-center-fg': '#09090b',
+            '--pulse-center-border': lightAdoptedBg,
             '--pulse-center-shadow':
-              '0 0 0 2px #09090b, 0 8px 24px rgba(0, 0, 0, 0.4)',
-            '--pulse-center-hover-bg': '#09090b',
-            '--pulse-center-hover-fg': '#ffffff',
+              '0 0 0 1px rgba(9, 9, 11, 0.18), 0 10px 24px rgba(0, 0, 0, 0.32)',
+            '--pulse-center-hover-bg': '#ffffff',
+            '--pulse-center-hover-fg': '#09090b',
             '--pulse-center-hover-border': lightAdoptedBg,
-            '--pulse-center-seek-bg': 'rgba(250, 250, 249, 0.94)',
+            '--pulse-center-seek-bg': 'rgba(255, 255, 255, 0.94)',
             '--pulse-center-seek-fg': '#09090b',
             '--pulse-center-seek-border': lightAdoptedBg,
             '--pulse-dot-color': lightAdoptedBg,
@@ -1068,27 +1098,27 @@ export function CadenceVideoSkin({
             '--pulse-switch-thumb': '#09090b',
           }
         : {
-            '--pulse-btn-bg': 'rgba(10, 12, 16, 0.84)',
-            '--pulse-btn-fg': '#f8fafc',
+            '--pulse-btn-bg': 'rgba(12, 14, 20, 0.88)',
+            '--pulse-btn-fg': '#ffffff',
             '--pulse-btn-border': adaptiveBorder,
             '--pulse-btn-shadow':
-              '0 2px 8px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
-            '--pulse-btn-hover-bg': `rgb(${videoRgb})`,
-            '--pulse-btn-hover-fg': adaptiveHoverFg,
+              '0 2px 8px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
+            '--pulse-btn-hover-bg': 'rgba(20, 24, 34, 0.96)',
+            '--pulse-btn-hover-fg': '#ffffff',
             '--pulse-btn-hover-border': adaptiveHoverBorder,
-            '--pulse-btn-hover-shadow': `0 0 0 1px rgba(${videoRgb}, 0.35), 0 4px 12px rgba(0, 0, 0, 0.45)`,
-            '--pulse-btn-active-bg': `rgba(${videoRgb}, 0.2)`,
-            '--pulse-btn-active-fg': adaptiveActiveFg,
+            '--pulse-btn-hover-shadow': `0 0 0 1px rgba(${videoRgb}, 0.38), 0 4px 12px rgba(0, 0, 0, 0.5)`,
+            '--pulse-btn-active-bg': 'rgba(18, 22, 32, 0.94)',
+            '--pulse-btn-active-fg': '#ffffff',
             '--pulse-btn-active-border': adaptiveHoverBorder,
-            '--pulse-btn-active-shadow': `0 2px 8px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14)`,
-            '--pulse-center-bg': 'rgba(10, 12, 16, 0.86)',
+            '--pulse-btn-active-shadow': '0 2px 8px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.16)',
+            '--pulse-center-bg': 'rgba(12, 14, 20, 0.88)',
             '--pulse-center-fg': '#ffffff',
             '--pulse-center-border': adaptiveBorder,
-            '--pulse-center-shadow': '0 0 0 1px rgba(0, 0, 0, 0.52), 0 10px 24px rgba(0, 0, 0, 0.54), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
-            '--pulse-center-hover-bg': `rgb(${videoRgb})`,
-            '--pulse-center-hover-fg': adaptiveHoverFg,
+            '--pulse-center-shadow': '0 0 0 1px rgba(0, 0, 0, 0.55), 0 10px 24px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.16)',
+            '--pulse-center-hover-bg': 'rgba(20, 24, 34, 0.96)',
+            '--pulse-center-hover-fg': '#ffffff',
             '--pulse-center-hover-border': adaptiveHoverBorder,
-            '--pulse-center-seek-bg': 'rgba(10, 12, 16, 0.8)',
+            '--pulse-center-seek-bg': 'rgba(12, 14, 20, 0.84)',
             '--pulse-center-seek-fg': '#ffffff',
             '--pulse-center-seek-border': adaptiveBorder,
             '--pulse-dot-color': adaptiveIconColor,
@@ -1360,6 +1390,7 @@ export function CadenceVideoSkin({
     <Container
       className={`cadence-skin ${className}`}
       style={skinStyle}
+      data-paused={!isPlaying ? '' : undefined}
       data-pulse-theme={theme}
       data-theme-mode={isLightUi ? 'light' : isWhiteTone ? 'contrast' : 'adaptive'}
       data-backdrop={backdropMode}
@@ -1728,11 +1759,11 @@ export function CadenceVideoSkin({
                     }
                   >
                     {state.ended ? (
-                      <RotateCcw className="w-6 h-6" style={{ color: activeAccent }} aria-hidden="true" />
+                      <RotateCcw className="w-6 h-6 shrink-0" strokeWidth={2} aria-hidden="true" />
                     ) : state.paused ? (
-                      <Play className="w-6 h-6 fill-current ml-0.5" aria-hidden="true" />
+                      <CleanPlayIcon className="w-7 h-7 shrink-0" />
                     ) : (
-                      <Pause className="w-6 h-6 fill-current" aria-hidden="true" />
+                      <CleanPauseIcon className="w-7 h-7 shrink-0" />
                     )}
                   </button>
                 )}
@@ -1950,11 +1981,11 @@ export function CadenceVideoSkin({
                             } ${!state.paused && playbackRate !== 1 ? 'cadence-speed-pulse' : ''}`}
                           >
                             {state.ended ? (
-                              <RotateCcw className="w-[18px] h-[18px]" strokeWidth={2.2} aria-hidden="true" />
+                              <RotateCcw className="w-[18px] h-[18px] shrink-0" strokeWidth={2.1} aria-hidden="true" />
                             ) : state.paused ? (
-                              <Play className="w-[18px] h-[18px] fill-current ml-0.5" aria-hidden="true" />
+                              <CleanPlayIcon className="w-[20px] h-[20px] shrink-0" />
                             ) : (
-                              <Pause className="w-[18px] h-[18px] fill-current" aria-hidden="true" />
+                              <CleanPauseIcon className="w-[20px] h-[20px] shrink-0" />
                             )}
                           </button>
                         )}

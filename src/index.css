@@ -477,8 +477,8 @@
     border-color: var(--pulse-center-hover-border, rgb(var(--pulse-video-rgb, 255, 107, 0)));
     background: var(--pulse-center-hover-bg, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.24));
     color: var(--pulse-center-hover-fg, #ffffff);
-    box-shadow: var(--pulse-btn-hover-shadow, 0 0 0 2px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.25), 0 0 24px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.4));
-    transform: scale(1.06);
+    box-shadow: var(--pulse-btn-hover-shadow, 0 0 0 1px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.3), 0 8px 20px rgba(0, 0, 0, 0.5));
+    transform: scale(1.05);
   }
 
   .cadence-center-play:active {
@@ -1106,30 +1106,30 @@
   }
 
   .cadence-btn-primary {
-    background: var(--pulse-btn-active-bg, rgba(10, 12, 16, 0.84));
-    color: var(--pulse-btn-active-fg, rgb(var(--pulse-video-rgb, 255, 107, 0)));
-    border: 1.5px solid var(--pulse-btn-active-border, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.9));
-    box-shadow: var(--pulse-btn-active-shadow, 0 0 0 1px rgba(0, 0, 0, 0.36), 0 0 16px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.3));
+    background: var(--pulse-btn-bg, rgba(10, 12, 16, 0.84));
+    color: var(--pulse-btn-fg, #f8fafc);
+    border: 1.5px solid var(--pulse-btn-border, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.78));
+    box-shadow: var(--pulse-btn-shadow, 0 2px 8px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14));
   }
 
   .cadence-btn-primary:hover {
     background: var(--pulse-btn-hover-bg, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.28));
     color: var(--pulse-btn-hover-fg, #ffffff);
     border-color: var(--pulse-btn-hover-border, rgb(var(--pulse-video-rgb, 255, 107, 0)));
-    box-shadow: var(--pulse-btn-hover-shadow, 0 0 0 2px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.24), 0 0 22px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.42));
+    box-shadow: var(--pulse-btn-hover-shadow, 0 0 0 1px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.35), 0 4px 12px rgba(0, 0, 0, 0.45));
   }
 
   .cadence-play-glow {
-    background: var(--pulse-btn-active-bg, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.22));
+    background: var(--pulse-btn-active-bg, rgba(var(--pulse-video-rgb, 255, 107, 0), 0.18));
     border-color: var(--pulse-btn-active-border, rgb(var(--pulse-video-rgb, 255, 107, 0)));
     color: var(--pulse-btn-active-fg, #ffffff);
-    box-shadow: var(--pulse-btn-active-shadow, 0 0 0 1px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.25), 0 0 16px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.34));
+    box-shadow: var(--pulse-btn-active-shadow, 0 2px 8px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.14));
   }
 
   .cadence-speed-pulse {
     box-shadow:
-      0 0 0 1.5px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.55),
-      0 0 16px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.45);
+      0 0 0 1.5px rgba(var(--pulse-video-rgb, 255, 107, 0), 0.5),
+      0 4px 12px rgba(0, 0, 0, 0.45);
   }
 
   .cadence-btn[disabled],

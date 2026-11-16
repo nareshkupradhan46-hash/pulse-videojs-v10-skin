@@ -381,6 +381,7 @@ export function CadenceVideoSkin({
   const swipeHudTimerRef = useRef<number | null>(null);
 
   const [subtitlesOpen, setSubtitlesOpen] = useState<boolean>(false);
+  const [keyboardFocusWithin, setKeyboardFocusWithin] = useState<boolean>(false);
   const [subtitlesTab, setSubtitlesTab] = useState<'controls' | 'transcript'>('controls');
   const [transcriptCopied, setTranscriptCopied] = useState<boolean>(false);
   const [subtitleUploadMsg, setSubtitleUploadMsg] = useState<string | null>(null);
@@ -418,7 +419,12 @@ export function CadenceVideoSkin({
   );
 
   useEffect(() => {
+    const clearFocusOnFullscreen = () => setKeyboardFocusWithin(false);
+    document.addEventListener('fullscreenchange', clearFocusOnFullscreen);
+    document.addEventListener('webkitfullscreenchange', clearFocusOnFullscreen);
     return () => {
+      document.removeEventListener('fullscreenchange', clearFocusOnFullscreen);
+      document.removeEventListener('webkitfullscreenchange', clearFocusOnFullscreen);
       if (shortcutTimerRef.current !== null) {
         window.clearTimeout(shortcutTimerRef.current);
       }
@@ -1386,6 +1392,29 @@ export function CadenceVideoSkin({
   const formatShortcutUpper = (k: string) =>
     k === ' ' ? 'SPACE' : k.toUpperCase();
 
+  const handleContainerPointerDownCapture = useCallback(() => {
+    setKeyboardFocusWithin(false);
+  }, []);
+
+  const handleContainerFocusCapture = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    const target = e.target;
+    if (target === e.currentTarget || !(target instanceof HTMLElement)) {
+      return;
+    }
+    try {
+      setKeyboardFocusWithin(target.matches(':focus-visible'));
+    } catch {
+      setKeyboardFocusWithin(false);
+    }
+  }, []);
+
+  const handleContainerBlurCapture = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = e.relatedTarget as Node | null;
+    if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
+      setKeyboardFocusWithin(false);
+    }
+  }, []);
+
   return (
     <Container
       className={`cadence-skin ${className}`}
@@ -1400,8 +1429,13 @@ export function CadenceVideoSkin({
       data-dyslexic={accessibility.dyslexicFont ? 'true' : undefined}
       data-large-text={accessibility.largeText ? 'true' : undefined}
       data-force-controls={forceControlsVisible ? 'true' : undefined}
+      data-keyboard-focus={keyboardFocusWithin ? 'true' : undefined}
+      data-popup-open={subtitlesOpen ? 'true' : undefined}
       aria-label={`Video player: ${title}`}
       onKeyDownCapture={handleContainerKeyDownCapture}
+      onPointerDownCapture={handleContainerPointerDownCapture}
+      onFocusCapture={handleContainerFocusCapture}
+      onBlurCapture={handleContainerBlurCapture}
     >
       {/* Underlying Video.js Media Element */}
       {children}

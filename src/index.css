@@ -257,7 +257,8 @@
   .cadence-skin[data-controls-visible] .cadence-cue-stage-bottom,
   .cadence-skin[data-paused] .cadence-cue-stage-bottom,
   .cadence-skin[data-force-controls="true"] .cadence-cue-stage-bottom,
-  .cadence-skin:focus-within .cadence-cue-stage-bottom {
+  .cadence-skin[data-keyboard-focus="true"] .cadence-cue-stage-bottom,
+  .cadence-skin[data-popup-open="true"] .cadence-cue-stage-bottom {
     bottom: 118px;
   }
 
@@ -358,13 +359,27 @@
   .cadence-skin[data-controls-visible] .cadence-controls-root,
   .cadence-skin[data-paused] .cadence-controls-root,
   .cadence-skin[data-force-controls="true"] .cadence-controls-root,
-  .cadence-skin:focus-within .cadence-controls-root {
+  .cadence-skin[data-keyboard-focus="true"] .cadence-controls-root,
+  .cadence-skin[data-popup-open="true"] .cadence-controls-root {
     opacity: 1;
   }
 
-  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:focus-within) .cadence-controls-root,
-  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not(:focus-within) .cadence-controls-root * {
+  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]) .cadence-controls-root,
+  .cadence-skin:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]) .cadence-controls-root * {
     pointer-events: none !important;
+  }
+
+  .cadence-skin[data-fullscreen]:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]),
+  .cadence-skin:fullscreen:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]) {
+    cursor: none;
+  }
+
+  .cadence-skin:-webkit-full-screen:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]) {
+    cursor: none;
+  }
+
+  .cadence-skin:-moz-full-screen:not([data-controls-visible]):not([data-paused]):not([data-force-controls="true"]):not([data-keyboard-focus="true"]):not([data-popup-open="true"]) {
+    cursor: none;
   }
 
   .cadence-backdrop {
@@ -382,7 +397,8 @@
   .cadence-skin[data-controls-visible] .cadence-backdrop,
   .cadence-skin[data-paused] .cadence-backdrop,
   .cadence-skin[data-force-controls="true"] .cadence-backdrop,
-  .cadence-skin:focus-within .cadence-backdrop {
+  .cadence-skin[data-keyboard-focus="true"] .cadence-backdrop,
+  .cadence-skin[data-popup-open="true"] .cadence-backdrop {
     opacity: 1;
   }
 
@@ -2118,7 +2134,8 @@
   .cadence-skin[data-controls-visible] .cadence-cue-stage-bottom,
   .cadence-skin[data-paused] .cadence-cue-stage-bottom,
   .cadence-skin[data-force-controls="true"] .cadence-cue-stage-bottom,
-  .cadence-skin:focus-within .cadence-cue-stage-bottom {
+  .cadence-skin[data-keyboard-focus="true"] .cadence-cue-stage-bottom,
+  .cadence-skin[data-popup-open="true"] .cadence-cue-stage-bottom {
     bottom: 72px;
   }
 

@@ -738,7 +738,7 @@ export const SkinTestbench = memo(function SkinTestbench({
                 {reels.map((reel) => {
                   const active = activeReelId === reel.id && !muxPlaybackId;
                   const Icon =
-                    reel.id === 'bright' || reel.id === 'mux-skate'
+                    reel.id === 'bright'
                       ? Sun
                       : reel.id === 'dark'
                         ? Moon
@@ -789,7 +789,7 @@ export const SkinTestbench = memo(function SkinTestbench({
                   type="text"
                   value={muxInput}
                   onChange={(e) => setMuxInput(e.target.value)}
-                  placeholder="Paste Mux Playback ID (e.g. DS00Spx1CV902MCtPj5WknGlR102V5HFkDe)"
+                  placeholder="Paste Mux Playback ID (e.g. J6jeOO8UeffmS00owFCsdOP01dYk5NNddmO792zKAz1kE)"
                   className="flex-1 min-w-0 rounded-lg bg-black/50 border border-white/12 px-3 py-2 text-xs font-mono-tabular text-white placeholder:text-zinc-500 focus:border-[#FF6B00] focus:outline-none"
                 />
                 <button

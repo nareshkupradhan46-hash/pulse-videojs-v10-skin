@@ -1686,7 +1686,19 @@ export function CadenceVideoSkin({
           <Tooltip.Provider delay={200}>
             {/* Top Bar: Video Title (Left) + Real-Time Status Bar (Right) */}
             <div className="cadence-top-bar">
-              <div className="cadence-telemetry-pill">
+              <div className="cadence-telemetry-pill gap-2">
+                {(muxPlaybackId || reel.isHls) && (
+                  <span
+                    className="cadence-hide-xs inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono-tabular font-semibold tracking-wide shrink-0 border"
+                    style={{
+                      backgroundColor: 'rgba(12, 14, 20, 0.72)',
+                      borderColor: 'var(--pulse-btn-border, rgba(255, 107, 0, 0.65))',
+                      color: 'var(--pulse-menu-accent, #FF6B00)',
+                    }}
+                  >
+                    {muxPlaybackId ? 'MUX HLS' : 'HLS ABR'}
+                  </span>
+                )}
                 <span className="cadence-telemetry-title">{title}</span>
               </div>
 
